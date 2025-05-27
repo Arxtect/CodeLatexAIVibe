@@ -31,6 +31,9 @@ async function initIDE() {
         // 暴露设置 UI 到全局
         window.settingsUI = window.ide.settingsUI;
         
+        // 暴露版本管理 UI 到全局
+        window.versionUI = window.ide.versionUI;
+        
         // 创建示例项目
         await createSampleProject();
         
@@ -222,6 +225,19 @@ window.resetAllSettings = () => {
 window.resetShortcuts = () => {
     if (window.ide && window.ide.settingsUI) {
         window.ide.settingsUI.resetShortcuts();
+    }
+};
+
+// 版本管理相关的全局函数
+window.openVersionManager = () => {
+    if (window.ide) {
+        window.ide.openVersionManager();
+    }
+};
+
+window.createSnapshot = () => {
+    if (window.ide) {
+        window.ide.createSnapshot();
     }
 };
 

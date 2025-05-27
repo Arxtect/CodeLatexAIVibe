@@ -4,6 +4,8 @@ import { PluginManager } from './PluginManager.js';
 import { SettingsManager } from './SettingsManager.js';
 import { ShortcutManager } from './ShortcutManager.js';
 import { SettingsUI } from './SettingsUI.js';
+import { VersionManager } from './VersionManager.js';
+import { VersionUI } from './VersionUI.js';
 
 export class IDE {
     constructor() {
@@ -13,6 +15,8 @@ export class IDE {
         this.settingsManager = new SettingsManager();
         this.shortcutManager = new ShortcutManager(this.settingsManager);
         this.settingsUI = null; // 将在 initUI 中初始化
+        this.versionManager = new VersionManager();
+        this.versionUI = null; // 将在 initUI 中初始化
         this.openTabs = new Map(); // 存储打开的标签页
         this.currentFile = null;
         this.isDirty = false; // 当前文件是否有未保存的更改
@@ -30,6 +34,8 @@ export class IDE {
         this.shortcutManager.registerAction('rename', () => this.renameCurrentFile(), '重命名');
         this.shortcutManager.registerAction('delete', () => this.deleteCurrentFile(), '删除');
         this.shortcutManager.registerAction('toggleSidebar', () => this.toggleSidebar(), '切换侧边栏');
+        this.shortcutManager.registerAction('openVersionManager', () => this.openVersionManager(), '打开版本管理');
+        this.shortcutManager.registerAction('createSnapshot', () => this.createSnapshot(), '创建快照');
     }
 
     setupSettingsListeners() {
@@ -136,6 +142,12 @@ export class IDE {
     initUI() {
         // 初始化设置 UI
         this.settingsUI = new SettingsUI(this.settingsManager, this.shortcutManager, this.pluginManager);
+        
+        // 初始化版本管理 UI
+        this.versionUI = new VersionUI(this.versionManager, this);
+        
+        // 初始化版本管理器
+        this.versionManager.init();
         
         // 初始化右键菜单
         this.initContextMenu();
@@ -528,6 +540,9 @@ export class IDE {
             const language = this.getLanguageFromFileName(filePath);
             monaco.editor.setModelLanguage(this.editor.getModel(), language);
 
+            // 绑定版本管理
+            this.versionManager.bindEditor(filePath, this.editor);
+
             this.isDirty = false;
             this.updateStatusBar();
             
@@ -760,6 +775,64 @@ export class IDE {
     openSettings() {
         if (this.settingsUI) {
             this.settingsUI.open();
+        }
+    }
+
+    // 版本管理相关方法
+    openVersionManager() {
+        if (this.versionUI) {
+            this.versionUI.open();
+        }
+    }
+
+    createSnapshot() {
+        if (this.currentFile && this.versionManager) {
+            const description = prompt('请输入快照描述（可选）:');
+            if (description !== null) {
+                this.versionManager.createSnapshot(this.currentFile, description);
+            }
+        } else {
+            alert('请先打开一个文件');
+        }
+    }
+
+    // 重写 closeTab 方法以清理版本管理
+    closeTab(filePath) {
+        // 检查是否有未保存的更改
+        if (this.openTabs.has(filePath)) {
+            const tabData = this.openTabs.get(filePath);
+            if (tabData.isDirty) {
+                const shouldSave = confirm('文件有未保存的更改，是否保存？');
+                if (shouldSave) {
+                    this.saveFile(filePath);
+                }
+            }
+        }
+
+        // 解绑版本管理
+        this.versionManager.unbindEditor(filePath);
+
+        // 移除标签
+        const tab = document.querySelector(`[data-file-path="${filePath}"]`);
+        if (tab) {
+            tab.remove();
+        }
+
+        // 移除文件数据
+        this.openTabs.delete(filePath);
+
+        // 如果关闭的是当前文件，切换到其他标签
+        if (this.currentFile === filePath) {
+            const remainingTabs = document.querySelectorAll('.tab');
+            if (remainingTabs.length > 0) {
+                const nextFilePath = remainingTabs[0].dataset.filePath;
+                this.switchToTab(nextFilePath);
+            } else {
+                this.currentFile = null;
+                this.editor.setValue('');
+                this.isDirty = false;
+                this.updateStatusBar();
+            }
         }
     }
 } 

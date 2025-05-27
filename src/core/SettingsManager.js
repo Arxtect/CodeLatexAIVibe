@@ -12,7 +12,9 @@ export class SettingsManager {
                 'find': 'Ctrl+F',
                 'replace': 'Ctrl+H',
                 'toggleSidebar': 'Ctrl+B',
-                'commandPalette': 'Ctrl+Shift+P'
+                'commandPalette': 'Ctrl+Shift+P',
+                'openVersionManager': 'Ctrl+Shift+V',
+                'createSnapshot': 'Ctrl+Shift+S'
             },
             plugins: {
                 enabled: [],
@@ -132,7 +134,9 @@ export class SettingsManager {
             'find': 'Ctrl+F',
             'replace': 'Ctrl+H',
             'toggleSidebar': 'Ctrl+B',
-            'commandPalette': 'Ctrl+Shift+P'
+            'commandPalette': 'Ctrl+Shift+P',
+            'openVersionManager': 'Ctrl+Shift+V',
+            'createSnapshot': 'Ctrl+Shift+S'
         };
         this.saveSettings();
     }

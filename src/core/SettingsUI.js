@@ -85,7 +85,9 @@ export class SettingsUI {
             'find': '查找',
             'replace': '替换',
             'toggleSidebar': '切换侧边栏',
-            'commandPalette': '命令面板'
+            'commandPalette': '命令面板',
+            'openVersionManager': '打开版本管理',
+            'createSnapshot': '创建快照'
         };
 
         // 添加所有快捷键
