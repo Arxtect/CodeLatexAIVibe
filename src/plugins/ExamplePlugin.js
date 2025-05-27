@@ -4,9 +4,11 @@ export class ExamplePlugin {
     constructor() {
         this.id = 'example-plugin';
         this.name = '示例插件';
+        this.description = '提供字数统计、自动保存和保存历史记录功能';
         this.version = '1.0.0';
         this.type = 'utility';
         this.supportedLanguages = ['latex', 'markdown'];
+        this.enabled = true;
         
         // 插件配置
         this.config = {
@@ -80,18 +82,47 @@ export class ExamplePlugin {
             statusBar.appendChild(wordCountElement);
         }
 
-        // 添加插件菜单项
-        this.addPluginMenu();
+        // 插件菜单已集成到设置系统中
     }
 
-    // 添加插件菜单
-    addPluginMenu() {
-        const toolbar = document.querySelector('.toolbar');
-        if (toolbar) {
-            const pluginButton = document.createElement('button');
-            pluginButton.textContent = '插件设置';
-            pluginButton.onclick = () => this.showPluginSettings();
-            toolbar.appendChild(pluginButton);
+    // 插件配置方法 - 由设置系统调用
+    configure() {
+        const settings = prompt(
+            '示例插件设置 (JSON格式):\n' +
+            '- enabled: 是否启用插件\n' +
+            '- autoSave: 是否自动保存\n' +
+            '- wordCount: 是否显示字数统计',
+            JSON.stringify(this.config, null, 2)
+        );
+        
+        if (settings) {
+            try {
+                const newConfig = JSON.parse(settings);
+                this.config = { ...this.config, ...newConfig };
+                this.pluginManager.setPluginConfig(this.id, this.config);
+                alert('设置已保存');
+                
+                // 应用新配置
+                this.applyConfig();
+            } catch (error) {
+                alert('设置格式错误: ' + error.message);
+            }
+        }
+    }
+
+    // 应用配置
+    applyConfig() {
+        // 根据配置更新插件行为
+        if (!this.config.wordCount) {
+            const wordCountElement = document.getElementById('word-count');
+            if (wordCountElement) {
+                wordCountElement.style.display = 'none';
+            }
+        } else {
+            const wordCountElement = document.getElementById('word-count');
+            if (wordCountElement) {
+                wordCountElement.style.display = 'inline';
+            }
         }
     }
 
@@ -177,26 +208,29 @@ export class ExamplePlugin {
         localStorage.setItem('save-logs', JSON.stringify(logs));
     }
 
-    // 显示插件设置
-    showPluginSettings() {
-        const settings = prompt(
-            '插件设置 (JSON格式):\n' +
-            '- enabled: 是否启用插件\n' +
-            '- autoSave: 是否自动保存\n' +
-            '- wordCount: 是否显示字数统计',
-            JSON.stringify(this.config, null, 2)
-        );
+    // 启用插件
+    enable() {
+        this.enabled = true;
+        this.addCustomUI();
+        console.log('示例插件已启用');
+    }
+
+    // 禁用插件
+    disable() {
+        this.enabled = false;
         
-        if (settings) {
-            try {
-                const newConfig = JSON.parse(settings);
-                this.config = { ...this.config, ...newConfig };
-                this.pluginManager.setPluginConfig(this.id, this.config);
-                alert('设置已保存');
-            } catch (error) {
-                alert('设置格式错误: ' + error.message);
-            }
+        // 移除 UI 元素
+        const wordCountElement = document.getElementById('word-count');
+        if (wordCountElement) {
+            wordCountElement.remove();
         }
+        
+        // 清理定时器
+        if (this.autoSaveTimer) {
+            clearTimeout(this.autoSaveTimer);
+        }
+        
+        console.log('示例插件已禁用');
     }
 
     // 获取保存日志

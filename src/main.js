@@ -28,6 +28,9 @@ async function initIDE() {
         // 初始化 UI
         window.ide.initUI();
         
+        // 暴露设置 UI 到全局
+        window.settingsUI = window.ide.settingsUI;
+        
         // 创建示例项目
         await createSampleProject();
         
@@ -74,9 +77,52 @@ async function createSampleProject() {
 
 \\end{document}`;
 
+    const chapterContent = `\\chapter{第一章}
+
+这是第一章的内容。
+
+\\section{章节介绍}
+这里是章节的详细介绍。
+
+\\subsection{子章节}
+子章节的内容。`;
+
+    const bibliographyContent = `@article{einstein1905,
+    title={Zur Elektrodynamik bewegter Körper},
+    author={Einstein, Albert},
+    journal={Annalen der Physik},
+    volume={17},
+    number={10},
+    pages={891--921},
+    year={1905}
+}
+
+@book{knuth1984,
+    title={The TeXbook},
+    author={Knuth, Donald E.},
+    year={1984},
+    publisher={Addison-Wesley}
+}`;
+
     try {
+        // 创建主文件
         await window.ide.fileSystem.writeFile('/main.tex', sampleContent);
-        await window.ide.fileSystem.writeFile('/README.md', '# LaTeX 项目\n\n这是一个示例 LaTeX 项目。');
+        await window.ide.fileSystem.writeFile('/README.md', '# LaTeX 项目\n\n这是一个示例 LaTeX 项目。\n\n## 文件结构\n\n- `main.tex` - 主文档\n- `chapters/` - 章节文件夹\n- `images/` - 图片文件夹\n- `references/` - 参考文献');
+        
+        // 创建文件夹和子文件
+        await window.ide.fileSystem.mkdir('/chapters');
+        await window.ide.fileSystem.writeFile('/chapters/chapter1.tex', chapterContent);
+        await window.ide.fileSystem.writeFile('/chapters/introduction.tex', '\\chapter{引言}\n\n这是引言部分的内容。');
+        
+        await window.ide.fileSystem.mkdir('/images');
+        await window.ide.fileSystem.writeFile('/images/README.md', '# 图片文件夹\n\n请将图片文件放在这个文件夹中。');
+        
+        await window.ide.fileSystem.mkdir('/references');
+        await window.ide.fileSystem.writeFile('/references/bibliography.bib', bibliographyContent);
+        
+        // 创建配置文件夹
+        await window.ide.fileSystem.mkdir('/config');
+        await window.ide.fileSystem.writeFile('/config/settings.json', '{\n  "compiler": "pdflatex",\n  "output": "pdf",\n  "bibtex": true\n}');
         
         // 刷新文件浏览器
         window.ide.refreshFileExplorer();
@@ -152,6 +198,31 @@ window.deleteFile = () => {
 window.renameFile = () => {
     // TODO: 实现重命名文件功能
     console.log('重命名文件功能待实现');
+};
+
+// 设置相关的全局函数
+window.openSettings = () => {
+    if (window.ide) {
+        window.ide.openSettings();
+    }
+};
+
+window.exportSettings = () => {
+    if (window.ide && window.ide.settingsUI) {
+        window.ide.settingsUI.exportSettings();
+    }
+};
+
+window.resetAllSettings = () => {
+    if (window.ide && window.ide.settingsUI) {
+        window.ide.settingsUI.resetAllSettings();
+    }
+};
+
+window.resetShortcuts = () => {
+    if (window.ide && window.ide.settingsUI) {
+        window.ide.settingsUI.resetShortcuts();
+    }
 };
 
 // 页面加载完成后初始化

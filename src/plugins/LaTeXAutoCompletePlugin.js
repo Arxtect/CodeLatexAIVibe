@@ -4,10 +4,12 @@ export class LaTeXAutoCompletePlugin {
     constructor() {
         this.id = 'latex-autocomplete';
         this.name = 'LaTeX 自动完成';
+        this.description = '为 LaTeX 文档提供智能自动完成功能';
         this.version = '1.0.0';
         this.type = 'autocomplete';
         this.supportedLanguages = ['latex'];
         this.completionProvider = null;
+        this.enabled = true;
     }
 
     init(pluginManager) {
@@ -351,6 +353,23 @@ export class LaTeXAutoCompletePlugin {
         // 简单检查是否在数学模式中
         const dollarCount = (beforeCursor.match(/\$/g) || []).length;
         return dollarCount % 2 === 1;
+    }
+
+    enable() {
+        this.enabled = true;
+        if (!this.completionProvider) {
+            this.registerCompletionProvider();
+        }
+        console.log('LaTeX 自动完成插件已启用');
+    }
+
+    disable() {
+        this.enabled = false;
+        if (this.completionProvider) {
+            this.completionProvider.dispose();
+            this.completionProvider = null;
+        }
+        console.log('LaTeX 自动完成插件已禁用');
     }
 
     destroy() {

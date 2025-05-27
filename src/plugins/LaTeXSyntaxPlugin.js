@@ -4,10 +4,12 @@ export class LaTeXSyntaxPlugin {
     constructor() {
         this.id = 'latex-syntax';
         this.name = 'LaTeX 语法高亮';
+        this.description = '为 LaTeX 文档提供语法高亮功能';
         this.version = '1.0.0';
         this.type = 'syntax';
         this.supportedLanguages = ['latex'];
         this.languageRegistered = false;
+        this.enabled = true;
     }
 
     init(pluginManager) {
@@ -129,6 +131,19 @@ export class LaTeXSyntaxPlugin {
 
         this.languageRegistered = true;
         console.log('LaTeX 语法高亮插件初始化完成');
+    }
+
+    enable() {
+        this.enabled = true;
+        if (!this.languageRegistered) {
+            this.registerLanguage();
+        }
+        console.log('LaTeX 语法高亮插件已启用');
+    }
+
+    disable() {
+        this.enabled = false;
+        console.log('LaTeX 语法高亮插件已禁用');
     }
 
     destroy() {

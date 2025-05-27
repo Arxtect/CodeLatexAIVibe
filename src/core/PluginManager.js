@@ -73,6 +73,28 @@ export class PluginManager {
         return Array.from(this.plugins.values());
     }
 
+    // 启用插件
+    enablePlugin(pluginId) {
+        const plugin = this.plugins.get(pluginId);
+        if (plugin) {
+            if (typeof plugin.enable === 'function') {
+                plugin.enable();
+            }
+            console.log(`插件 ${pluginId} 已启用`);
+        }
+    }
+
+    // 禁用插件
+    disablePlugin(pluginId) {
+        const plugin = this.plugins.get(pluginId);
+        if (plugin) {
+            if (typeof plugin.disable === 'function') {
+                plugin.disable();
+            }
+            console.log(`插件 ${pluginId} 已禁用`);
+        }
+    }
+
     // 添加钩子
     addHook(hookName, handler) {
         if (!this.hooks[hookName]) {

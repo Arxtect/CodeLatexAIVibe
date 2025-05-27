@@ -48,25 +48,95 @@
         .file-item {
             padding: 8px 16px;
             cursor: pointer;
-            border-bottom: 1px solid #3e3e42;
             display: flex;
             align-items: center;
             gap: 8px;
+            position: relative;
+            user-select: none;
+            transition: background-color 0.2s ease;
         }
         
         .file-item:hover {
             background: #2a2d2e;
         }
         
-        .file-item.active {
+        .file-item.selected {
             background: #094771;
+        }
+        
+        .file-item.folder {
+            font-weight: 500;
+        }
+        
+        .file-item.file {
+            font-weight: normal;
         }
         
         .file-icon {
             width: 16px;
             height: 16px;
-            background: #d4d4d4;
-            border-radius: 2px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            flex-shrink: 0;
+        }
+        
+        .file-name {
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        
+        .folder-toggle {
+            width: 16px;
+            height: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            color: #cccccc;
+            transition: transform 0.2s ease;
+            flex-shrink: 0;
+        }
+        
+        .folder-content {
+            border-left: 1px solid #3e3e42;
+            margin-left: 8px;
+            overflow: hidden;
+            transition: max-height 0.3s ease;
+        }
+        
+        .folder-content.collapsed {
+            max-height: 0;
+        }
+        
+        .folder-content.expanded {
+            max-height: 1000px;
+        }
+        
+        .file-item.folder:hover .folder-toggle {
+            color: #ffffff;
+        }
+        
+        .folder-toggle {
+            transition: transform 0.2s ease;
+        }
+        
+        .folder-toggle.expanded {
+            transform: rotate(90deg);
+        }
+        
+        .loading, .error {
+            padding: 16px;
+            text-align: center;
+            color: #cccccc;
+            font-style: italic;
+        }
+        
+        .error {
+            color: #f48771;
         }
         
         .main-content {
@@ -189,6 +259,12 @@
             background: #094771;
         }
         
+        .context-menu-separator {
+            height: 1px;
+            background: #3e3e42;
+            margin: 4px 0;
+        }
+        
         .modal {
             position: fixed;
             top: 0;
@@ -249,6 +325,248 @@
             background: #3e3e42;
             color: #d4d4d4;
         }
+        
+        .btn-danger {
+            background: #e81123;
+            color: white;
+        }
+        
+        /* 设置模态框样式 */
+        .settings-modal {
+            max-width: 900px;
+            width: 90vw;
+            height: 80vh;
+            max-height: 600px;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .settings-modal .modal-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid #3e3e42;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .close-btn {
+            background: none;
+            border: none;
+            color: #d4d4d4;
+            font-size: 20px;
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 4px;
+        }
+        
+        .close-btn:hover {
+            background: #e81123;
+        }
+        
+        .settings-container {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+        
+        .settings-sidebar {
+            width: 200px;
+            background: #2d2d30;
+            border-right: 1px solid #3e3e42;
+        }
+        
+        .settings-nav {
+            padding: 8px 0;
+        }
+        
+        .settings-nav-item {
+            padding: 12px 20px;
+            cursor: pointer;
+            border-bottom: 1px solid #3e3e42;
+            transition: background-color 0.2s;
+        }
+        
+        .settings-nav-item:hover {
+            background: #383838;
+        }
+        
+        .settings-nav-item.active {
+            background: #094771;
+            border-left: 3px solid #0e639c;
+        }
+        
+        .settings-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+        }
+        
+        .settings-tab {
+            display: none;
+        }
+        
+        .settings-tab.active {
+            display: block;
+        }
+        
+        .settings-tab h3 {
+            margin-bottom: 20px;
+            color: #d4d4d4;
+            font-size: 18px;
+        }
+        
+        .setting-group {
+            margin-bottom: 20px;
+        }
+        
+        .setting-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: #d4d4d4;
+            font-weight: 500;
+        }
+        
+        .setting-group input[type="text"],
+        .setting-group input[type="number"],
+        .setting-group select {
+            width: 100%;
+            max-width: 300px;
+            padding: 8px;
+            background: #1e1e1e;
+            border: 1px solid #3e3e42;
+            border-radius: 4px;
+            color: #d4d4d4;
+        }
+        
+        .setting-group input[type="range"] {
+            width: 200px;
+            margin-right: 10px;
+        }
+        
+        .setting-group input[type="checkbox"] {
+            margin-right: 8px;
+        }
+        
+        .setting-description {
+            font-size: 12px;
+            color: #888;
+            margin-top: 4px;
+        }
+        
+        /* 快捷键设置样式 */
+        .shortcuts-search {
+            margin-bottom: 16px;
+        }
+        
+        .shortcuts-search input {
+            width: 100%;
+            max-width: 400px;
+        }
+        
+        .shortcuts-list {
+            max-height: 400px;
+            overflow-y: auto;
+            border: 1px solid #3e3e42;
+            border-radius: 4px;
+        }
+        
+        .shortcut-item {
+            display: flex;
+            align-items: center;
+            padding: 12px 16px;
+            border-bottom: 1px solid #3e3e42;
+            transition: background-color 0.2s;
+        }
+        
+        .shortcut-item:hover {
+            background: #2a2d2e;
+        }
+        
+        .shortcut-item:last-child {
+            border-bottom: none;
+        }
+        
+        .shortcut-description {
+            flex: 1;
+            color: #d4d4d4;
+        }
+        
+        .shortcut-key {
+            background: #3e3e42;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 12px;
+            margin-right: 8px;
+            min-width: 80px;
+            text-align: center;
+        }
+        
+        .shortcut-edit {
+            background: #0e639c;
+            color: white;
+            border: none;
+            padding: 4px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        
+        .shortcuts-actions {
+            margin-top: 16px;
+        }
+        
+        /* 插件管理样式 */
+        .plugins-list {
+            border: 1px solid #3e3e42;
+            border-radius: 4px;
+        }
+        
+        .plugin-item {
+            display: flex;
+            align-items: center;
+            padding: 16px;
+            border-bottom: 1px solid #3e3e42;
+        }
+        
+        .plugin-item:last-child {
+            border-bottom: none;
+        }
+        
+        .plugin-info {
+            flex: 1;
+        }
+        
+        .plugin-name {
+            font-weight: 500;
+            color: #d4d4d4;
+            margin-bottom: 4px;
+        }
+        
+        .plugin-description {
+            font-size: 12px;
+            color: #888;
+        }
+        
+        .plugin-toggle {
+            margin-left: 16px;
+        }
+        
+        .plugin-toggle input[type="checkbox"] {
+            transform: scale(1.2);
+        }
+        
+        .plugin-config {
+            margin-left: 8px;
+            background: #3e3e42;
+            color: #d4d4d4;
+            border: none;
+            padding: 4px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+        }
     </style>
 </head>
 <body>
@@ -268,6 +586,7 @@
                 <button onclick="createNewFolder()">新建文件夹</button>
                 <button onclick="saveCurrentFile()">保存</button>
                 <button onclick="compileLatex()">编译</button>
+                <button onclick="openSettings()">设置</button>
             </div>
             
             <div class="tab-bar" id="tabBar">
@@ -319,6 +638,134 @@
             <div class="modal-footer">
                 <button class="btn-secondary" onclick="closeModal('newFolderModal')">取消</button>
                 <button class="btn-primary" onclick="confirmNewFolder()">创建</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 设置模态框 -->
+    <div class="modal" id="settingsModal">
+        <div class="modal-content settings-modal">
+            <div class="modal-header">
+                <span>设置</span>
+                <button class="close-btn" onclick="closeModal('settingsModal')">×</button>
+            </div>
+            <div class="settings-container">
+                <div class="settings-sidebar">
+                    <div class="settings-nav">
+                        <div class="settings-nav-item active" data-tab="shortcuts">快捷键</div>
+                        <div class="settings-nav-item" data-tab="plugins">插件管理</div>
+                        <div class="settings-nav-item" data-tab="editor">编辑器</div>
+                        <div class="settings-nav-item" data-tab="ui">界面</div>
+                        <div class="settings-nav-item" data-tab="import-export">导入/导出</div>
+                    </div>
+                </div>
+                <div class="settings-content">
+                    <!-- 快捷键设置 -->
+                    <div class="settings-tab active" id="shortcuts-tab">
+                        <h3>快捷键设置</h3>
+                        <div class="shortcuts-search">
+                            <input type="text" id="shortcutsSearch" placeholder="搜索快捷键...">
+                        </div>
+                        <div class="shortcuts-list" id="shortcutsList">
+                            <!-- 快捷键列表将在这里动态生成 -->
+                        </div>
+                        <div class="shortcuts-actions">
+                            <button class="btn-secondary" onclick="resetShortcuts()">重置为默认</button>
+                        </div>
+                    </div>
+
+                    <!-- 插件管理 -->
+                    <div class="settings-tab" id="plugins-tab">
+                        <h3>插件管理</h3>
+                        <div class="plugins-list" id="pluginsList">
+                            <!-- 插件列表将在这里动态生成 -->
+                        </div>
+                    </div>
+
+                    <!-- 编辑器设置 -->
+                    <div class="settings-tab" id="editor-tab">
+                        <h3>编辑器设置</h3>
+                        <div class="setting-group">
+                            <label>字体大小</label>
+                            <input type="number" id="editorFontSize" min="10" max="24" value="14">
+                        </div>
+                        <div class="setting-group">
+                            <label>主题</label>
+                            <select id="editorTheme">
+                                <option value="latex-dark">深色主题</option>
+                                <option value="vs-light">浅色主题</option>
+                            </select>
+                        </div>
+                        <div class="setting-group">
+                            <label>
+                                <input type="checkbox" id="editorWordWrap" checked>
+                                自动换行
+                            </label>
+                        </div>
+                        <div class="setting-group">
+                            <label>
+                                <input type="checkbox" id="editorMinimap" checked>
+                                显示小地图
+                            </label>
+                        </div>
+                        <div class="setting-group">
+                            <label>
+                                <input type="checkbox" id="editorAutoSave">
+                                自动保存
+                            </label>
+                        </div>
+                        <div class="setting-group">
+                            <label>自动保存延迟 (毫秒)</label>
+                            <input type="number" id="editorAutoSaveDelay" min="500" max="10000" value="2000">
+                        </div>
+                    </div>
+
+                    <!-- 界面设置 -->
+                    <div class="settings-tab" id="ui-tab">
+                        <h3>界面设置</h3>
+                        <div class="setting-group">
+                            <label>侧边栏宽度</label>
+                            <input type="range" id="sidebarWidth" min="200" max="400" value="250">
+                            <span id="sidebarWidthValue">250px</span>
+                        </div>
+                        <div class="setting-group">
+                            <label>
+                                <input type="checkbox" id="showStatusBar" checked>
+                                显示状态栏
+                            </label>
+                        </div>
+                        <div class="setting-group">
+                            <label>
+                                <input type="checkbox" id="showToolbar" checked>
+                                显示工具栏
+                            </label>
+                        </div>
+                        <div class="setting-group">
+                            <label>
+                                <input type="checkbox" id="compactMode">
+                                紧凑模式
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- 导入/导出 -->
+                    <div class="settings-tab" id="import-export-tab">
+                        <h3>导入/导出设置</h3>
+                        <div class="setting-group">
+                            <button class="btn-primary" onclick="exportSettings()">导出设置</button>
+                            <p class="setting-description">将当前设置导出为 JSON 文件</p>
+                        </div>
+                        <div class="setting-group">
+                            <input type="file" id="importFile" accept=".json" style="display: none;">
+                            <button class="btn-secondary" onclick="document.getElementById('importFile').click()">导入设置</button>
+                            <p class="setting-description">从 JSON 文件导入设置</p>
+                        </div>
+                        <div class="setting-group">
+                            <button class="btn-danger" onclick="resetAllSettings()">重置所有设置</button>
+                            <p class="setting-description">将所有设置重置为默认值</p>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>

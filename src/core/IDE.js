@@ -1,15 +1,75 @@
 import * as monaco from 'monaco-editor';
 import { FileSystem } from './FileSystem.js';
 import { PluginManager } from './PluginManager.js';
+import { SettingsManager } from './SettingsManager.js';
+import { ShortcutManager } from './ShortcutManager.js';
+import { SettingsUI } from './SettingsUI.js';
 
 export class IDE {
     constructor() {
         this.editor = null;
         this.fileSystem = new FileSystem();
         this.pluginManager = new PluginManager();
+        this.settingsManager = new SettingsManager();
+        this.shortcutManager = new ShortcutManager(this.settingsManager);
+        this.settingsUI = null; // 将在 initUI 中初始化
         this.openTabs = new Map(); // 存储打开的标签页
         this.currentFile = null;
         this.isDirty = false; // 当前文件是否有未保存的更改
+        
+        this.setupShortcuts();
+        this.setupSettingsListeners();
+    }
+
+    setupShortcuts() {
+        // 注册所有快捷键动作
+        this.shortcutManager.registerAction('newFile', () => this.createNewFile(), '新建文件');
+        this.shortcutManager.registerAction('saveFile', () => this.saveCurrentFile(), '保存文件');
+        this.shortcutManager.registerAction('closeTab', () => this.closeCurrentTab(), '关闭标签');
+        this.shortcutManager.registerAction('compile', () => this.compileLatex(), '编译');
+        this.shortcutManager.registerAction('rename', () => this.renameCurrentFile(), '重命名');
+        this.shortcutManager.registerAction('delete', () => this.deleteCurrentFile(), '删除');
+        this.shortcutManager.registerAction('toggleSidebar', () => this.toggleSidebar(), '切换侧边栏');
+    }
+
+    setupSettingsListeners() {
+        // 监听设置变更
+        this.settingsManager.on('settingsChanged', (settings) => {
+            this.applySettings(settings);
+        });
+    }
+
+    applySettings(settings) {
+        if (this.editor) {
+            // 应用编辑器设置
+            const editorSettings = settings.editor;
+            this.editor.updateOptions({
+                fontSize: editorSettings.fontSize,
+                wordWrap: editorSettings.wordWrap,
+                minimap: { enabled: editorSettings.minimap },
+                lineNumbers: editorSettings.lineNumbers ? 'on' : 'off'
+            });
+
+            // 应用主题
+            monaco.editor.setTheme(editorSettings.theme);
+        }
+
+        // 应用 UI 设置
+        const uiSettings = settings.ui;
+        const sidebar = document.querySelector('.sidebar');
+        if (sidebar) {
+            sidebar.style.width = `${uiSettings.sidebarWidth}px`;
+        }
+
+        const statusBar = document.querySelector('.status-bar');
+        if (statusBar) {
+            statusBar.style.display = uiSettings.showStatusBar ? 'flex' : 'none';
+        }
+
+        const toolbar = document.querySelector('.toolbar');
+        if (toolbar) {
+            toolbar.style.display = uiSettings.showToolbar ? 'flex' : 'none';
+        }
     }
 
     async initEditor() {
@@ -74,22 +134,33 @@ export class IDE {
     }
 
     initUI() {
+        // 初始化设置 UI
+        this.settingsUI = new SettingsUI(this.settingsManager, this.shortcutManager, this.pluginManager);
+        
         // 初始化右键菜单
         this.initContextMenu();
         
-        // 初始化键盘快捷键
-        this.initKeyboardShortcuts();
-        
         // 初始化文件浏览器
         this.refreshFileExplorer();
+        
+        // 应用初始设置
+        this.applySettings(this.settingsManager.settings);
     }
 
     initContextMenu() {
         const fileExplorer = document.getElementById('fileExplorer');
         const contextMenu = document.getElementById('contextMenu');
+        let contextTarget = null;
 
         fileExplorer.addEventListener('contextmenu', (e) => {
             e.preventDefault();
+            
+            // 找到被右键点击的文件项
+            contextTarget = e.target.closest('.file-item');
+            
+            // 更新右键菜单内容
+            this.updateContextMenu(contextTarget);
+            
             contextMenu.style.display = 'block';
             contextMenu.style.left = e.pageX + 'px';
             contextMenu.style.top = e.pageY + 'px';
@@ -97,7 +168,162 @@ export class IDE {
 
         document.addEventListener('click', () => {
             contextMenu.style.display = 'none';
+            contextTarget = null;
         });
+        
+        // 存储当前右键目标，供其他函数使用
+        this.contextTarget = null;
+        fileExplorer.addEventListener('contextmenu', (e) => {
+            this.contextTarget = e.target.closest('.file-item');
+        });
+    }
+
+    updateContextMenu(target) {
+        const contextMenu = document.getElementById('contextMenu');
+        
+        if (!target) {
+            // 空白区域右键
+            contextMenu.innerHTML = `
+                <div class="context-menu-item" onclick="window.createNewFile()">新建文件</div>
+                <div class="context-menu-item" onclick="window.createNewFolder()">新建文件夹</div>
+            `;
+        } else if (target.classList.contains('folder')) {
+            // 文件夹右键
+            contextMenu.innerHTML = `
+                <div class="context-menu-item" onclick="window.ide.createFileInFolder()">在此文件夹中新建文件</div>
+                <div class="context-menu-item" onclick="window.ide.createFolderInFolder()">在此文件夹中新建文件夹</div>
+                <div class="context-menu-separator"></div>
+                <div class="context-menu-item" onclick="window.ide.renameItem()">重命名</div>
+                <div class="context-menu-item" onclick="window.ide.deleteItem()">删除</div>
+            `;
+        } else {
+            // 文件右键
+            contextMenu.innerHTML = `
+                <div class="context-menu-item" onclick="window.ide.openFile(window.ide.getContextTargetPath())">打开</div>
+                <div class="context-menu-separator"></div>
+                <div class="context-menu-item" onclick="window.ide.renameItem()">重命名</div>
+                <div class="context-menu-item" onclick="window.ide.deleteItem()">删除</div>
+            `;
+        }
+    }
+
+    getContextTargetPath() {
+        if (!this.contextTarget) return null;
+        return this.contextTarget.dataset.path || null;
+    }
+
+    async createFileInFolder() {
+        const folderPath = this.getContextTargetPath();
+        if (!folderPath) return;
+        
+        const fileName = prompt('请输入文件名:');
+        if (!fileName) return;
+        
+        try {
+            const filePath = folderPath === '/' ? `/${fileName}` : `${folderPath}/${fileName}`;
+            await this.fileSystem.writeFile(filePath, '');
+            await this.refreshFileExplorer();
+            this.openFile(filePath);
+        } catch (error) {
+            alert('创建文件失败: ' + error.message);
+        }
+    }
+
+    async createFolderInFolder() {
+        const folderPath = this.getContextTargetPath();
+        if (!folderPath) return;
+        
+        const folderName = prompt('请输入文件夹名:');
+        if (!folderName) return;
+        
+        try {
+            const newFolderPath = folderPath === '/' ? `/${folderName}` : `${folderPath}/${folderName}`;
+            await this.fileSystem.mkdir(newFolderPath);
+            await this.refreshFileExplorer();
+        } catch (error) {
+            alert('创建文件夹失败: ' + error.message);
+        }
+    }
+
+    async renameItem() {
+        const itemPath = this.getContextTargetPath();
+        if (!itemPath) return;
+        
+        const currentName = itemPath.split('/').pop();
+        const newName = prompt('请输入新名称:', currentName);
+        if (!newName || newName === currentName) return;
+        
+        try {
+            const parentPath = itemPath.substring(0, itemPath.lastIndexOf('/')) || '/';
+            const newPath = parentPath === '/' ? `/${newName}` : `${parentPath}/${newName}`;
+            
+            // 检查是否是文件夹
+            const stats = await this.fileSystem.stat(itemPath);
+            if (stats.isDirectory()) {
+                // 重命名文件夹 (简单实现，实际需要递归处理)
+                alert('文件夹重命名功能暂未实现');
+            } else {
+                // 重命名文件
+                const content = await this.fileSystem.readFile(itemPath);
+                await this.fileSystem.writeFile(newPath, content);
+                await this.fileSystem.unlink(itemPath);
+                
+                // 如果文件当前打开，更新标签
+                if (this.openTabs.has(itemPath)) {
+                    const tabData = this.openTabs.get(itemPath);
+                    this.openTabs.delete(itemPath);
+                    this.openTabs.set(newPath, tabData);
+                    
+                    // 更新标签显示
+                    const tab = document.querySelector(`[data-file-path="${itemPath}"]`);
+                    if (tab) {
+                        tab.dataset.filePath = newPath;
+                        tab.querySelector('span').textContent = newName;
+                    }
+                    
+                    if (this.currentFile === itemPath) {
+                        this.currentFile = newPath;
+                    }
+                }
+            }
+            
+            await this.refreshFileExplorer();
+        } catch (error) {
+            alert('重命名失败: ' + error.message);
+        }
+    }
+
+    async deleteItem() {
+        const itemPath = this.getContextTargetPath();
+        if (!itemPath) return;
+        
+        const itemName = itemPath.split('/').pop();
+        if (!confirm(`确定要删除 "${itemName}" 吗？`)) return;
+        
+        try {
+            const stats = await this.fileSystem.stat(itemPath);
+            if (stats.isDirectory()) {
+                // 删除文件夹 (简单实现)
+                try {
+                    await this.fileSystem.rmdir(itemPath);
+                } catch (error) {
+                    alert('无法删除非空文件夹');
+                    return;
+                }
+            } else {
+                // 删除文件
+                await this.fileSystem.unlink(itemPath);
+                
+                // 如果文件当前打开，关闭标签
+                if (this.openTabs.has(itemPath)) {
+                    this.closeTab(itemPath);
+                }
+            }
+            
+            await this.refreshFileExplorer();
+        } catch (error) {
+            alert('删除失败: ' + error.message);
+        }
     }
 
     initKeyboardShortcuts() {
@@ -122,33 +348,154 @@ export class IDE {
                 e.preventDefault();
                 this.closeCurrentTab();
             }
+
         });
     }
 
     async refreshFileExplorer() {
         const fileExplorer = document.getElementById('fileExplorer');
-        fileExplorer.innerHTML = '';
-
+        
+        // 显示加载状态
+        fileExplorer.innerHTML = '<div class="loading">加载中...</div>';
+        
         try {
-            const files = await this.fileSystem.readdir('/');
-            
-            for (const file of files) {
-                const fileItem = document.createElement('div');
-                fileItem.className = 'file-item';
-                fileItem.innerHTML = `
-                    <div class="file-icon"></div>
-                    <span>${file}</span>
-                `;
-                
-                fileItem.addEventListener('click', () => {
-                    this.openFile(`/${file}`);
-                });
-
-                fileExplorer.appendChild(fileItem);
-            }
+            await this.renderFileTree('/', fileExplorer, 0);
         } catch (error) {
             console.error('刷新文件浏览器失败:', error);
+            fileExplorer.innerHTML = '<div class="error">加载文件失败</div>';
         }
+    }
+
+    async renderFileTree(dirPath, container, level = 0) {
+        try {
+            // 如果是根目录，清空容器
+            if (level === 0) {
+                container.innerHTML = '';
+            }
+            
+            const files = await this.fileSystem.readdir(dirPath);
+            
+            // 如果文件夹为空，显示提示
+            if (files.length === 0 && level > 0) {
+                const emptyItem = document.createElement('div');
+                emptyItem.className = 'empty-folder';
+                emptyItem.style.paddingLeft = `${16 + level * 20}px`;
+                emptyItem.innerHTML = '<span style="color: #666; font-style: italic;">空文件夹</span>';
+                container.appendChild(emptyItem);
+                return;
+            }
+            
+            for (const file of files) {
+                const fullPath = dirPath === '/' ? `/${file}` : `${dirPath}/${file}`;
+                const stats = await this.fileSystem.stat(fullPath);
+                
+                const fileItem = document.createElement('div');
+                fileItem.className = 'file-item';
+                fileItem.style.paddingLeft = `${16 + level * 20}px`;
+                
+                if (stats.isDirectory()) {
+                    // 文件夹
+                    fileItem.classList.add('folder');
+                    fileItem.dataset.path = fullPath;
+                    fileItem.innerHTML = `
+                        <div class="file-icon folder-icon">📁</div>
+                        <span class="file-name">${file}</span>
+                        <div class="folder-toggle">▶</div>
+                    `;
+                    
+                    const folderContent = document.createElement('div');
+                    folderContent.className = 'folder-content collapsed';
+                    
+                    fileItem.addEventListener('click', async (e) => {
+                        e.stopPropagation();
+                        const toggle = fileItem.querySelector('.folder-toggle');
+                        const icon = fileItem.querySelector('.folder-icon');
+                        
+                        try {
+                            if (folderContent.classList.contains('collapsed')) {
+                                // 展开文件夹
+                                folderContent.classList.remove('collapsed');
+                                folderContent.classList.add('expanded');
+                                toggle.classList.add('expanded');
+                                toggle.textContent = '▼';
+                                icon.textContent = '📂';
+                                
+                                // 如果还没有加载内容，则加载
+                                if (folderContent.children.length === 0) {
+                                    await this.renderFileTree(fullPath, folderContent, level + 1);
+                                }
+                            } else {
+                                // 折叠文件夹
+                                folderContent.classList.remove('expanded');
+                                folderContent.classList.add('collapsed');
+                                toggle.classList.remove('expanded');
+                                toggle.textContent = '▶';
+                                icon.textContent = '📁';
+                            }
+                        } catch (error) {
+                            console.error('文件夹操作失败:', error);
+                            // 重置状态
+                            folderContent.classList.remove('expanded');
+                            folderContent.classList.add('collapsed');
+                            toggle.classList.remove('expanded');
+                            toggle.textContent = '▶';
+                            icon.textContent = '📁';
+                        }
+                    });
+                    
+                    container.appendChild(fileItem);
+                    container.appendChild(folderContent);
+                } else {
+                    // 文件
+                    const fileExtension = file.split('.').pop().toLowerCase();
+                    const fileIcon = this.getFileIcon(fileExtension);
+                    
+                    fileItem.classList.add('file');
+                    fileItem.dataset.path = fullPath;
+                    fileItem.innerHTML = `
+                        <div class="file-icon">${fileIcon}</div>
+                        <span class="file-name">${file}</span>
+                    `;
+                    
+                    fileItem.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        this.openFile(fullPath);
+                        
+                        // 高亮选中的文件
+                        document.querySelectorAll('.file-item.selected').forEach(item => {
+                            item.classList.remove('selected');
+                        });
+                        fileItem.classList.add('selected');
+                    });
+                    
+                    container.appendChild(fileItem);
+                }
+            }
+        } catch (error) {
+            console.error(`渲染文件树失败 (${dirPath}):`, error);
+        }
+    }
+
+    getFileIcon(extension) {
+        const iconMap = {
+            'tex': '📄',
+            'latex': '📄',
+            'md': '📝',
+            'txt': '📄',
+            'js': '📜',
+            'json': '⚙️',
+            'html': '🌐',
+            'css': '🎨',
+            'png': '🖼️',
+            'jpg': '🖼️',
+            'jpeg': '🖼️',
+            'gif': '🖼️',
+            'pdf': '📕',
+            'zip': '📦',
+            'default': '📄'
+        };
+        
+        return iconMap[extension] || iconMap['default'];
     }
 
     async openFile(filePath) {
@@ -331,6 +678,13 @@ export class IDE {
     updateStatusBar() {
         const fileType = this.currentFile ? this.getLanguageFromFileName(this.currentFile) : 'text';
         document.getElementById('fileType').textContent = fileType.toUpperCase();
+        
+        // 更新状态文本
+        if (this.currentFile) {
+            const fileName = this.currentFile.split('/').pop();
+            const isDirty = this.isDirty ? ' (已修改)' : '';
+            document.getElementById('statusText').textContent = `${fileName}${isDirty}`;
+        }
     }
 
     updateCursorPosition(position) {
@@ -373,5 +727,39 @@ export class IDE {
                 document.getElementById('statusText').textContent = '就绪';
             }, 2000);
         }, 1000);
+    }
+
+    // 快捷键动作方法
+    createNewFile() {
+        document.getElementById('newFileModal').style.display = 'flex';
+        document.getElementById('newFileName').focus();
+    }
+
+    renameCurrentFile() {
+        if (this.currentFile) {
+            this.contextTarget = document.querySelector(`[data-path="${this.currentFile}"]`);
+            this.renameItem();
+        }
+    }
+
+    deleteCurrentFile() {
+        if (this.currentFile) {
+            this.contextTarget = document.querySelector(`[data-path="${this.currentFile}"]`);
+            this.deleteItem();
+        }
+    }
+
+    toggleSidebar() {
+        const sidebar = document.querySelector('.sidebar');
+        if (sidebar) {
+            const isHidden = sidebar.style.display === 'none';
+            sidebar.style.display = isHidden ? 'flex' : 'none';
+        }
+    }
+
+    openSettings() {
+        if (this.settingsUI) {
+            this.settingsUI.open();
+        }
     }
 } 
