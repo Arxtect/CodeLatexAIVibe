@@ -65,6 +65,9 @@ export class SettingsUI {
             case 'ui':
                 this.loadUISettings();
                 break;
+            case 'versions':
+                this.loadVersionSettings();
+                break;
         }
     }
 
@@ -86,8 +89,10 @@ export class SettingsUI {
             'replace': '替换',
             'toggleSidebar': '切换侧边栏',
             'commandPalette': '命令面板',
-            'openVersionManager': '打开版本管理',
-            'createSnapshot': '创建快照'
+            'toggleVersionSidebar': '切换版本侧边栏',
+            'createSnapshot': '创建快照',
+            'undo': '撤销',
+            'redo': '重做'
         };
 
         // 添加所有快捷键
@@ -402,11 +407,217 @@ export class SettingsUI {
         }
     }
 
+    // 版本管理设置
+    loadVersionSettings() {
+        if (!window.ide || !window.ide.versionManager) {
+            document.getElementById('versions-tab').innerHTML = `
+                <h3>版本管理</h3>
+                <p>版本管理系统未初始化</p>
+            `;
+            return;
+        }
+
+        const versionManager = window.ide.versionManager;
+        const status = versionManager.getProjectStatus();
+        const snapshots = versionManager.getProjectSnapshots();
+
+        const versionsTab = document.getElementById('versions-tab');
+        versionsTab.innerHTML = `
+            <h3>版本管理</h3>
+            
+            <div class="setting-group">
+                <h4>项目状态</h4>
+                ${status ? `
+                    <div class="version-status-grid">
+                        <div class="status-item">
+                            <span class="status-label">项目路径:</span>
+                            <span class="status-value">${status.projectPath}</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="status-label">文件数量:</span>
+                            <span class="status-value">${status.fileCount}</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="status-label">快照数量:</span>
+                            <span class="status-value">${status.totalSnapshots}</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="status-label">自动保存:</span>
+                            <span class="status-value ${status.autoSaveEnabled ? 'enabled' : 'disabled'}">
+                                ${status.autoSaveEnabled ? '已启用' : '已禁用'}
+                            </span>
+                        </div>
+                    </div>
+                ` : '<p>项目未初始化</p>'}
+            </div>
+
+            <div class="setting-group">
+                <h4>自动保存设置</h4>
+                <label>
+                    <input type="checkbox" id="autoSaveEnabled" ${status?.autoSaveEnabled ? 'checked' : ''} 
+                           onchange="window.settingsUI.toggleAutoSave(this.checked)">
+                    启用自动保存
+                </label>
+                <div class="setting-description">自动创建项目快照以防止数据丢失</div>
+                
+                <label>自动保存间隔 (秒)</label>
+                <input type="number" id="autoSaveInterval" min="10" max="3600" value="${status?.autoSaveInterval || 30}"
+                       onchange="window.settingsUI.setAutoSaveInterval(this.value)">
+                <div class="setting-description">设置自动保存的时间间隔</div>
+            </div>
+
+            <div class="setting-group">
+                <h4>快照管理</h4>
+                <button class="btn-primary" onclick="window.settingsUI.createProjectSnapshot()">创建项目快照</button>
+                <button class="btn-secondary" onclick="window.settingsUI.exportVersionHistory()">导出版本历史</button>
+                <button class="btn-danger" onclick="window.settingsUI.clearVersionHistory()">清空版本历史</button>
+            </div>
+
+            <div class="setting-group">
+                <h4>版本历史 (最近10个)</h4>
+                <div class="version-history-list" id="versionHistoryList">
+                    ${this.renderVersionHistoryList(snapshots.slice(-10).reverse())}
+                </div>
+                ${snapshots.length > 10 ? `
+                    <div class="version-pagination">
+                        <p>显示最近 10 个版本，共 ${snapshots.length} 个版本</p>
+                        <button class="btn-secondary" onclick="window.settingsUI.showAllVersions()">查看全部版本</button>
+                    </div>
+                ` : ''}
+            </div>
+        `;
+    }
+
+    renderVersionHistoryList(snapshots) {
+        if (snapshots.length === 0) {
+            return '<p>暂无版本快照</p>';
+        }
+
+        return snapshots.map((snapshot, index) => {
+            const isLatest = index === 0;
+            const date = new Date(snapshot.timestamp);
+            const fileCount = Object.keys(snapshot.files).length;
+            
+            return `
+                <div class="version-history-item">
+                    <div class="version-header">
+                        <span class="version-number">v${snapshot.version}</span>
+                        ${isLatest ? '<span class="latest-badge">最新</span>' : ''}
+                        <span class="version-time">${date.toLocaleString()}</span>
+                    </div>
+                    <div class="version-info">
+                        <div class="version-description">${snapshot.description || '无描述'}</div>
+                        <div class="version-stats">${fileCount} 个文件</div>
+                    </div>
+                    <div class="version-actions">
+                        <button class="btn-small btn-secondary" onclick="window.settingsUI.restoreProjectSnapshot('${snapshot.id}')">恢复</button>
+                        <button class="btn-small btn-secondary" onclick="window.settingsUI.viewProjectSnapshot('${snapshot.id}')">查看</button>
+                        <button class="btn-small btn-danger" onclick="window.settingsUI.deleteProjectSnapshot('${snapshot.id}')">删除</button>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    // 版本管理操作方法
+    toggleAutoSave(enabled) {
+        if (window.ide && window.ide.versionManager) {
+            window.ide.versionManager.setAutoSaveEnabled(enabled);
+            this.loadVersionSettings();
+        }
+    }
+
+    setAutoSaveInterval(seconds) {
+        if (window.ide && window.ide.versionManager) {
+            window.ide.versionManager.setAutoSaveInterval(parseInt(seconds));
+        }
+    }
+
+    createProjectSnapshot() {
+        if (window.ide && window.ide.versionManager) {
+            const description = prompt('请输入快照描述（可选）:');
+            if (description !== null) {
+                window.ide.versionManager.createProjectSnapshot(description);
+                this.loadVersionSettings();
+            }
+        }
+    }
+
+    restoreProjectSnapshot(snapshotId) {
+        if (confirm('确定要恢复到此版本吗？当前未保存的更改将丢失。')) {
+            if (window.ide && window.ide.versionManager) {
+                window.ide.versionManager.restoreProjectSnapshot(snapshotId);
+                this.loadVersionSettings();
+            }
+        }
+    }
+
+    viewProjectSnapshot(snapshotId) {
+        if (window.ide && window.ide.versionManager) {
+            const snapshot = window.ide.versionManager.getProjectSnapshot(snapshotId);
+            if (snapshot && window.versionSidebar) {
+                window.versionSidebar.showSnapshotViewer(snapshot);
+            }
+        }
+    }
+
+    deleteProjectSnapshot(snapshotId) {
+        if (confirm('确定要删除此快照吗？此操作不可撤销。')) {
+            if (window.ide && window.ide.versionManager) {
+                window.ide.versionManager.deleteProjectSnapshot(snapshotId);
+                this.loadVersionSettings();
+            }
+        }
+    }
+
+    exportVersionHistory() {
+        if (window.ide && window.ide.versionManager) {
+            const snapshots = window.ide.versionManager.getProjectSnapshots();
+            const status = window.ide.versionManager.getProjectStatus();
+            
+            const data = {
+                projectPath: status?.projectPath,
+                exportTime: new Date().toISOString(),
+                snapshots: snapshots
+            };
+
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `project-version-history-${Date.now()}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+    }
+
+    clearVersionHistory() {
+        if (confirm('确定要清空所有版本历史吗？此操作不可撤销！')) {
+            if (window.ide && window.ide.versionManager) {
+                const status = window.ide.versionManager.getProjectStatus();
+                if (status) {
+                    localStorage.removeItem(`project_snapshots_${status.projectPath}`);
+                    this.loadVersionSettings();
+                    alert('版本历史已清空');
+                }
+            }
+        }
+    }
+
+    showAllVersions() {
+        // 这里可以实现一个完整的版本历史查看器
+        alert('完整版本历史查看器功能待实现');
+    }
+
     loadAllSettings() {
         this.loadShortcuts();
         this.loadPlugins();
         this.loadEditorSettings();
         this.loadUISettings();
+        this.loadVersionSettings();
     }
 
     open() {

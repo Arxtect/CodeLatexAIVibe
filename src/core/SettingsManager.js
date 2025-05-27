@@ -13,8 +13,10 @@ export class SettingsManager {
                 'replace': 'Ctrl+H',
                 'toggleSidebar': 'Ctrl+B',
                 'commandPalette': 'Ctrl+Shift+P',
-                'openVersionManager': 'Ctrl+Shift+V',
-                'createSnapshot': 'Ctrl+Shift+S'
+                'toggleVersionSidebar': 'Ctrl+Shift+V',
+                'createSnapshot': 'Ctrl+Shift+S',
+                'undo': 'Ctrl+Z',
+                'redo': 'Ctrl+Y'
             },
             plugins: {
                 enabled: [],
@@ -135,8 +137,10 @@ export class SettingsManager {
             'replace': 'Ctrl+H',
             'toggleSidebar': 'Ctrl+B',
             'commandPalette': 'Ctrl+Shift+P',
-            'openVersionManager': 'Ctrl+Shift+V',
-            'createSnapshot': 'Ctrl+Shift+S'
+            'toggleVersionSidebar': 'Ctrl+Shift+V',
+            'createSnapshot': 'Ctrl+Shift+S',
+            'undo': 'Ctrl+Z',
+            'redo': 'Ctrl+Y'
         };
         this.saveSettings();
     }

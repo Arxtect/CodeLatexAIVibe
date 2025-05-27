@@ -31,8 +31,8 @@ async function initIDE() {
         // 暴露设置 UI 到全局
         window.settingsUI = window.ide.settingsUI;
         
-        // 暴露版本管理 UI 到全局
-        window.versionUI = window.ide.versionUI;
+        // 暴露版本侧边栏到全局
+        window.versionSidebar = window.ide.versionSidebar;
         
         // 创建示例项目
         await createSampleProject();
@@ -229,9 +229,9 @@ window.resetShortcuts = () => {
 };
 
 // 版本管理相关的全局函数
-window.openVersionManager = () => {
+window.toggleVersionSidebar = () => {
     if (window.ide) {
-        window.ide.openVersionManager();
+        window.ide.toggleVersionSidebar();
     }
 };
 
@@ -239,6 +239,20 @@ window.createSnapshot = () => {
     if (window.ide) {
         window.ide.createSnapshot();
     }
+};
+
+window.undo = () => {
+    if (window.ide) {
+        return window.ide.undo();
+    }
+    return false;
+};
+
+window.redo = () => {
+    if (window.ide) {
+        return window.ide.redo();
+    }
+    return false;
 };
 
 // 页面加载完成后初始化
