@@ -1,0 +1,22 @@
+{
+  "name": "latex-ide",
+  "version": "1.0.0",
+  "description": "A simple LaTeX IDE based on Monaco Editor and BrowserFS",
+  "main": "index.html",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "monaco-editor": "^0.44.0",
+    "browserfs": "^1.4.3"
+  },
+  "devDependencies": {
+    "vite": "^5.0.0",
+    "@types/node": "^20.0.0"
+  },
+  "keywords": ["latex", "ide", "monaco", "editor"],
+  "author": "",
+  "license": "MIT"
+} 
