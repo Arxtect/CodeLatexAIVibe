@@ -318,18 +318,17 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
             }
             
             this.log('info', `开始处理消息: ${message}`);
-            this.log('info', `用户请求: ${message}`);
             
             // 收集初始上下文
             let fullContext = await this.collectContext(message, context);
             
             // 初始化循环控制
-            let maxIterations = 15; // 初始软限制
+            let maxIterations = 15;
             let iteration = 0;
             let conversationHistory = []; // 存储整个对话历史
             let accumulatedContext = { ...fullContext }; // 累积的上下文信息
             
-            while (true) { // 改为无限循环，通过用户确认控制
+            while (true) {
                 iteration++;
                 this.log('info', `处理迭代 ${iteration}/${maxIterations}`);
                 
@@ -337,17 +336,13 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                 if (iteration > maxIterations) {
                     this.log('warn', `达到迭代软限制 ${maxIterations}，请求用户确认`);
                     
-                    // 创建确认消息
                     const confirmMessage = `⚠️ 任务处理已进行 ${maxIterations} 轮迭代，可能比较复杂。\n\n` +
                         `当前进度：\n` +
                         `- 已完成 ${conversationHistory.length} 个阶段\n` +
-                        `- 信息收集阶段: ${conversationHistory.filter(h => h.type === 'gather_info').length} 次\n` +
-                        `- 操作执行阶段: ${conversationHistory.filter(h => h.type === 'execute_operations').length} 次\n\n` +
-                        `是否继续处理？\n` +
-                        `• 点击"继续"将重置计数器并继续执行\n` +
-                        `• 点击"停止"将结束当前任务`;
+                        `- 工具调用: ${conversationHistory.filter(h => h.type === 'tool_calls').length} 次\n` +
+                        `- 执行操作: ${conversationHistory.filter(h => h.type === 'execute_operations').length} 次\n\n` +
+                        `是否继续处理？`;
                     
-                    // 通过UI显示确认对话框
                     const shouldContinue = await this.showIterationConfirmDialog(confirmMessage, iteration);
                     
                     if (!shouldContinue) {
@@ -356,82 +351,95 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                             `⏹️ 任务已停止\n\n` +
                             `处理摘要：\n` +
                             `- 总迭代次数: ${iteration - 1}\n` +
-                            `- 信息收集: ${conversationHistory.filter(h => h.type === 'gather_info').length} 次\n` +
-                            `- 操作执行: ${conversationHistory.filter(h => h.type === 'execute_operations').length} 次\n\n` +
+                            `- 工具调用: ${conversationHistory.filter(h => h.type === 'tool_calls').length} 次\n` +
+                            `- 执行操作: ${conversationHistory.filter(h => h.type === 'execute_operations').length} 次\n\n` +
                             `任务可能已部分完成，请检查结果。如需继续，请重新发送请求。`
                         );
                     }
                     
                     // 用户选择继续，重置计数器并增加限制
                     this.log('info', '用户选择继续，重置迭代计数器');
-                    maxIterations += 10; // 每次重置增加10次迭代机会
+                    maxIterations += 10;
                     
-                    // 显示继续处理的消息
                     if (onStream) {
                         onStream(`\n🔄 继续处理任务 (迭代 ${iteration})...\n`, '');
                     }
                 }
                 
-                // 调用大语言模型进行决策
-                const decision = await this.makeDecision(message, accumulatedContext, conversationHistory, onStream);
+                // 构建包含累积上下文的消息
+                const contextualMessage = this.buildContextualMessage(message, accumulatedContext, conversationHistory);
                 
-                // 处理不同类型的决策
-                if (decision.type === 'gather_info') {
-                    this.log('info', '执行信息获取阶段');
+                // 让 AI 自由选择：工具调用（只读）或执行操作（写入）
+                this.log('info', '调用 AI 进行自由决策...');
+                const response = await this.callOpenAI([
+                    { role: 'system', content: this.buildFlexibleSystemPrompt() },
+                    { role: 'user', content: contextualMessage }
+                ], onStream);
+                
+                // 处理 AI 的响应
+                if (response && response.isToolCallResponse) {
+                    // AI 选择了工具调用（只读操作）
+                    this.log('info', 'AI 选择了工具调用模式');
                     
-                    // 执行信息获取操作（只读）
-                    const gatherResult = await this.executeGatherInfo(decision, accumulatedContext);
+                    const toolCallResult = await this.handleToolCallsWithReadOnlyFilter(response, accumulatedContext);
                     
-                    // 将获取的信息添加到累积上下文
-                    accumulatedContext = this.mergeContext(accumulatedContext, gatherResult);
+                    // 将工具调用结果添加到累积上下文
+                    accumulatedContext = this.mergeContext(accumulatedContext, {
+                        toolCallResults: toolCallResult.results,
+                        lastToolCallSummary: toolCallResult.summary
+                    });
                     
                     // 添加到对话历史
                     conversationHistory.push({
-                        type: 'gather_info',
-                        decision: decision,
-                        result: gatherResult,
+                        type: 'tool_calls',
+                        response: response,
+                        result: toolCallResult,
                         timestamp: new Date().toISOString()
                     });
                     
-                    this.log('info', `信息获取完成，累积上下文项目: ${Object.keys(accumulatedContext).length}`);
+                    this.log('info', `工具调用完成，获得 ${Object.keys(toolCallResult.results).length} 个结果`);
                     
-                } else if (decision.type === 'execute_operations') {
-                    this.log('info', '执行操作阶段');
+                } else if (typeof response === 'string') {
+                    // AI 返回了文本响应，尝试解析是否包含执行指令
+                    const executionPlan = this.parseExecutionInstructions(response);
                     
-                    // 执行操作（写入/修改）
-                    const executeResult = await this.executeOperations(decision, accumulatedContext);
-                    
-                    // 添加到对话历史
-                    conversationHistory.push({
-                        type: 'execute_operations',
-                        decision: decision,
-                        result: executeResult,
-                        timestamp: new Date().toISOString()
-                    });
-                    
-                    this.log('info', `操作执行完成: ${executeResult.completedSteps}/${executeResult.totalSteps} 步骤`);
-                    
-                } else if (decision.type === 'complete_task') {
-                    this.log('info', '任务完成');
-                    
-                    // 任务完成，返回最终结果
-                    const finalMessage = `✅ ${decision.message || '任务已完成'}\n\n` +
-                        `处理摘要：\n` +
-                        `- 总迭代次数: ${iteration}\n` +
-                        `- 信息收集: ${conversationHistory.filter(h => h.type === 'gather_info').length} 次\n` +
-                        `- 操作执行: ${conversationHistory.filter(h => h.type === 'execute_operations').length} 次`;
-                    
-                    return this.createResponse(finalMessage);
-                    
-                } else if (decision.type === 'direct_response') {
-                    this.log('info', '直接响应');
-                    
-                    // 直接响应，不需要进一步处理
-                    return this.createResponse(decision.message);
-                    
+                    if (executionPlan && executionPlan.operations && executionPlan.operations.length > 0) {
+                        // AI 选择了执行操作模式
+                        this.log('info', 'AI 选择了执行操作模式');
+                        
+                        const executeResult = await this.executeOperationsFromPlan(executionPlan, accumulatedContext);
+                        
+                        // 将执行结果添加到累积上下文
+                        accumulatedContext = this.mergeContext(accumulatedContext, {
+                            executionResults: executeResult.results,
+                            lastExecutionSummary: executeResult.summary
+                        });
+                        
+                        // 添加到对话历史
+                        conversationHistory.push({
+                            type: 'execute_operations',
+                            plan: executionPlan,
+                            result: executeResult,
+                            timestamp: new Date().toISOString()
+                        });
+                        
+                        this.log('info', `执行操作完成: ${executeResult.completedSteps}/${executeResult.totalSteps} 步骤`);
+                        
+                    } else {
+                        // AI 认为任务已完成或给出了最终回答
+                        this.log('info', 'AI 给出最终回答');
+                        
+                        const finalMessage = `${response}\n\n` +
+                            `📊 处理摘要：\n` +
+                            `- 总迭代次数: ${iteration}\n` +
+                            `- 工具调用: ${conversationHistory.filter(h => h.type === 'tool_calls').length} 次\n` +
+                            `- 执行操作: ${conversationHistory.filter(h => h.type === 'execute_operations').length} 次`;
+                        
+                        return this.createResponse(finalMessage);
+                    }
                 } else {
-                    this.log('warn', '未知的决策类型', decision);
-                    return this.createResponse('❌ 决策类型异常，请重试');
+                    this.log('warn', '未知的响应格式', response);
+                    return this.createResponse('❌ 响应格式异常，请重试');
                 }
             }
             
@@ -2359,6 +2367,329 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
         }
     }
     
+    /**
+     * 构建灵活的系统提示词，让AI自由选择工具调用或执行操作
+     */
+    buildFlexibleSystemPrompt() {
+        return `你是 LaTeX Master，一个智能的 LaTeX 文档助手。
+
+**🔧 工作模式：**
+
+你可以自由选择以下两种工作方式：
+
+**1. 工具调用模式（信息获取）**
+当你需要获取更多信息时，可以使用以下只读工具：
+- \`read_file\`: 读取文件内容
+- \`list_files\`: 列出目录文件
+- \`get_file_structure\`: 获取项目结构
+- \`search_in_files\`: 搜索文件内容
+- \`get_project_info\`: 获取项目信息
+- \`get_editor_state\`: 获取编辑器状态
+
+**2. 执行操作模式（文件操作）**
+当你有足够信息需要执行具体操作时，在你的回答中包含操作指令：
+
+\`\`\`operations
+[
+  {
+    "type": "create",
+    "description": "创建新文件",
+    "target": "/path/to/new/file.tex",
+    "content": "文件内容"
+  },
+  {
+    "type": "edit",
+    "description": "编辑现有文件",
+    "target": "/path/to/file.tex",
+    "editType": "replace",
+    "startLine": 1,
+    "endLine": -1,
+    "content": "新的文件内容"
+  }
+]
+\`\`\`
+
+**可用的操作类型：**
+- \`create\`: 创建新文件
+- \`edit\`: 编辑现有文件（支持replace/insert/delete）
+- \`delete\`: 删除文件
+- \`move\`: 移动/重命名文件
+- \`compile\`: 编译LaTeX文档
+
+**决策原则：**
+1. 如果需要查看/分析现有文件但没有足够信息 → 使用工具调用
+2. 如果需要搜索特定内容但不知道在哪个文件 → 使用工具调用
+3. 如果有足够信息可以执行具体操作 → 在回答中包含操作指令
+4. 如果只是回答问题或提供建议 → 直接回答
+
+**重要：**
+- 工具调用只能用于读取信息，不能修改文件
+- 操作指令只能用于修改文件，不能读取信息
+- 你可以在多轮对话中灵活切换这两种模式
+- 每次的结果都会作为上下文提供给你，帮助你做出更好的决策`;
+    }
+
+    /**
+     * 构建包含累积上下文的消息
+     */
+    buildContextualMessage(originalMessage, accumulatedContext, conversationHistory) {
+        let message = `**用户需求：** ${originalMessage}\n\n`;
+        
+        // 添加当前可用的上下文信息
+        message += `**当前上下文信息：**\n`;
+        
+        // 项目信息
+        if (accumulatedContext.project) {
+            message += `- 项目：${accumulatedContext.project.name || '未命名'} (${accumulatedContext.project.files || 0} 个文件)\n`;
+        }
+        
+        // 当前编辑器状态
+        if (accumulatedContext.editor && accumulatedContext.editor.filePath) {
+            message += `- 当前编辑文件：${accumulatedContext.editor.filePath}\n`;
+            if (accumulatedContext.editor.content) {
+                const preview = accumulatedContext.editor.content.substring(0, 200);
+                message += `- 文件内容预览：${preview}${accumulatedContext.editor.content.length > 200 ? '...' : ''}\n`;
+            }
+        }
+        
+        // 用户提供的上下文
+        if (accumulatedContext.userContextItems && accumulatedContext.userContextItems.length > 0) {
+            message += `- 用户提供的上下文：${accumulatedContext.userContextItems.length} 项\n`;
+        }
+        
+        // 工具调用结果
+        if (accumulatedContext.toolCallResults) {
+            const resultCount = Object.keys(accumulatedContext.toolCallResults).length;
+            message += `- 已获取的信息：${resultCount} 项工具调用结果\n`;
+            if (accumulatedContext.lastToolCallSummary) {
+                message += `  最近获取：${accumulatedContext.lastToolCallSummary}\n`;
+            }
+        }
+        
+        // 执行结果
+        if (accumulatedContext.executionResults) {
+            const resultCount = Object.keys(accumulatedContext.executionResults).length;
+            message += `- 已执行的操作：${resultCount} 项操作结果\n`;
+            if (accumulatedContext.lastExecutionSummary) {
+                message += `  最近执行：${accumulatedContext.lastExecutionSummary}\n`;
+            }
+        }
+        
+        message += '\n';
+        
+        // 添加对话历史摘要
+        if (conversationHistory && conversationHistory.length > 0) {
+            message += `**执行历史：**\n`;
+            conversationHistory.forEach((entry, index) => {
+                message += `${index + 1}. [${entry.type}] `;
+                if (entry.type === 'tool_calls') {
+                    const toolCount = entry.response.content?.tool_calls?.length || 0;
+                    const successCount = Object.keys(entry.result.results || {}).length;
+                    message += `工具调用 (${successCount}/${toolCount} 成功)\n`;
+                } else if (entry.type === 'execute_operations') {
+                    const { completedSteps, totalSteps } = entry.result;
+                    message += `执行操作 (${completedSteps}/${totalSteps} 完成)\n`;
+                }
+            });
+            message += '\n';
+        }
+        
+        message += `**请基于上述信息，选择合适的方式处理用户需求。**`;
+        
+        return message;
+    }
+
+    /**
+     * 处理工具调用并过滤只读操作
+     */
+    async handleToolCallsWithReadOnlyFilter(response, context) {
+        const toolCalls = response.content.tool_calls || [];
+        const results = {};
+        let successCount = 0;
+        let summary = '';
+        
+        // 显示工具调用面板
+        let toolCallId = null;
+        if (window.agentPanel && typeof window.agentPanel.showToolCallPanel === 'function') {
+            toolCallId = window.agentPanel.showToolCallPanel(toolCalls, 'tool_call');
+        }
+        
+        for (let i = 0; i < toolCalls.length; i++) {
+            const toolCall = toolCalls[i];
+            const toolName = toolCall.function.name;
+            
+            // 检查是否为只读工具
+            if (!this.isReadOnlyTool(toolName)) {
+                this.log('warn', `跳过非只读工具: ${toolName}`);
+                
+                if (toolCallId && window.agentPanel) {
+                    window.agentPanel.updateToolCallStep(toolCallId, i, 'error', {
+                        success: false,
+                        error: '工具调用模式下只允许只读操作'
+                    });
+                }
+                continue;
+            }
+            
+            try {
+                this.log('info', `执行只读工具: ${toolName}`);
+                
+                if (toolCallId && window.agentPanel) {
+                    window.agentPanel.updateToolCallStep(toolCallId, i, 'executing');
+                }
+                
+                const result = await this.toolCallManager.executeToolCall(toolCall);
+                results[toolName] = result;
+                successCount++;
+                
+                if (toolCallId && window.agentPanel) {
+                    window.agentPanel.updateToolCallStep(toolCallId, i, 'success', result);
+                }
+                
+            } catch (error) {
+                this.log('error', `工具调用失败: ${toolName}`, error);
+                results[toolName] = { success: false, error: error.message };
+                
+                if (toolCallId && window.agentPanel) {
+                    window.agentPanel.updateToolCallStep(toolCallId, i, 'error', {
+                        success: false,
+                        error: error.message
+                    });
+                }
+            }
+        }
+        
+        if (toolCallId && window.agentPanel) {
+            window.agentPanel.completeToolCall(toolCallId);
+        }
+        
+        summary = `${successCount}/${toolCalls.length} 个工具调用成功`;
+        
+        return {
+            results,
+            summary,
+            successCount,
+            totalCount: toolCalls.length
+        };
+    }
+
+    /**
+     * 解析执行指令
+     */
+    parseExecutionInstructions(response) {
+        try {
+            // 查找 operations 代码块
+            const operationsMatch = response.match(/```operations\s*([\s\S]*?)\s*```/);
+            if (!operationsMatch) {
+                return null;
+            }
+            
+            const operationsJson = operationsMatch[1].trim();
+            const operations = JSON.parse(operationsJson);
+            
+            if (!Array.isArray(operations)) {
+                this.log('warn', '操作指令必须是数组格式');
+                return null;
+            }
+            
+            // 验证操作格式
+            for (const op of operations) {
+                if (!op.type || !this.isWriteOperation(op.type)) {
+                    this.log('warn', `无效的操作类型: ${op.type}`);
+                    return null;
+                }
+            }
+            
+            return {
+                operations,
+                originalResponse: response
+            };
+            
+        } catch (error) {
+            this.log('error', '解析执行指令失败', error);
+            return null;
+        }
+    }
+
+    /**
+     * 从计划执行操作
+     */
+    async executeOperationsFromPlan(plan, context) {
+        const operations = plan.operations;
+        const results = {};
+        let completedSteps = 0;
+        let summary = '';
+        
+        // 显示执行面板
+        let executionId = null;
+        if (window.agentPanel && typeof window.agentPanel.showToolCallPanel === 'function') {
+            // 转换操作为工具调用格式以复用可视化
+            const toolCallsFormat = operations.map((op, index) => ({
+                id: `exec_${index}`,
+                type: 'function',
+                function: {
+                    name: op.type,
+                    arguments: JSON.stringify(op)
+                }
+            }));
+            
+            executionId = window.agentPanel.showToolCallPanel(toolCallsFormat, 'execution');
+        }
+        
+        for (let i = 0; i < operations.length; i++) {
+            const operation = operations[i];
+            
+            try {
+                this.log('info', `执行操作 ${i + 1}/${operations.length}: ${operation.type}`);
+                
+                if (executionId && window.agentPanel) {
+                    window.agentPanel.updateToolCallStep(executionId, i, 'executing');
+                }
+                
+                const action = await this.createActionFromOperation(operation, context);
+                const result = await this.executeAction(action);
+                
+                results[`operation_${i}`] = {
+                    operation,
+                    result,
+                    success: true
+                };
+                completedSteps++;
+                
+                if (executionId && window.agentPanel) {
+                    window.agentPanel.updateToolCallStep(executionId, i, 'success', result);
+                }
+                
+            } catch (error) {
+                this.log('error', `操作执行失败: ${operation.type}`, error);
+                results[`operation_${i}`] = {
+                    operation,
+                    error: error.message,
+                    success: false
+                };
+                
+                if (executionId && window.agentPanel) {
+                    window.agentPanel.updateToolCallStep(executionId, i, 'error', {
+                        success: false,
+                        error: error.message
+                    });
+                }
+            }
+        }
+        
+        if (executionId && window.agentPanel) {
+            window.agentPanel.completeToolCall(executionId);
+        }
+        
+        summary = `${completedSteps}/${operations.length} 个操作成功执行`;
+        
+        return {
+            results,
+            summary,
+            completedSteps,
+            totalSteps: operations.length
+        };
+    }
 }
 
 /**
