@@ -1302,7 +1302,7 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
 **2. 执行计划模式（Execution Plan）**
 - 当你有足够信息执行具体任务时使用
 - 生成JSON格式的执行计划，包含具体的操作步骤
-- 支持的操作类型：create, edit, delete, move, search, compile, terminal, ui
+- 支持的操作类型：create, edit, delete, move, search, compile, ui
 
 **重要决策规则：**
 - 如果用户要求分析、修改现有文件但上下文中没有文件内容 → 使用工具调用获取信息
@@ -1316,8 +1316,7 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
 4. **move** - 移动/重命名文件
 5. **search** - 搜索文件内容
 6. **compile** - 编译 LaTeX 文档
-7. **terminal** - 执行终端命令
-8. **ui** - 用户界面操作
+7. **ui** - 用户界面操作
 
 **注意：执行计划中不要使用工具调用类型（如 read_file, list_files 等）！**
 
@@ -1849,10 +1848,9 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                     return this.createSearchAction(step.target, step.query);
                     
                 case 'compile':
-                    return this.createCompileAction(step.target);
                     
-                case 'terminal':
-                    return this.createTerminalAction(step.command);
+                case 'rmdir':
+                    return this.createRmdirAction(operation.target);
                     
                 case 'ui':
                     return this.createUIAction(step.action || 'showMessage', {
@@ -1993,14 +1991,6 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
         });
     }
     
-    /**
-     * 创建终端命令动作
-     */
-    createTerminalAction(command) {
-        return this.createAction('terminal', {
-            command: command
-        });
-    }
 
     /**
      * 创建目录动作

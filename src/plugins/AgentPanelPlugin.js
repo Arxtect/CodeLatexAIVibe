@@ -1709,8 +1709,6 @@ export class AgentPanelPlugin {
                 return `🔍 搜索文件: ${params.path || '所有文件'} (查找: "${params.query || '未指定'}")`;
             case 'compile':
                 return `🔨 编译 LaTeX: ${params.path || '当前文件'}`;
-            case 'terminal':
-                return `⚡ 执行命令: ${params.command || '未指定'}`;
             case 'ui':
                 if (params.action === 'showMessage') {
                     return `💬 显示消息: ${params.message || '未指定'}`;
@@ -3608,8 +3606,6 @@ export class AgentPanelPlugin {
             case 'get_open_tabs':
                 return `📑 获取打开的标签页`;
             case 'get_recent_changes':
-                return `📈 获取最近变更 (${args.limit || 10}条)`;
-            case 'execute_command':
                 return `⚡ 执行命令: ${args.command || '未指定'}`;
             case 'open_file':
                 return `📂 打开文件: ${args.file_path || args.path || '未指定'}`;
