@@ -345,6 +345,7 @@ async function initAgents() {
         const { ExampleAgent } = await import('./agents/ExampleAgent.js');
         const { ClineCompatAgent } = await import('./agents/ClineCompatAgent.js');
         const { LaTeXAssistantAgent } = await import('./agents/LaTeXAssistantAgent.js');
+        const { LatexMasterAgent } = await import('./agents/LatexMasterAgent.js');
         
         // 注册示例 Agent
         const exampleAgent = new ExampleAgent();
@@ -357,6 +358,10 @@ async function initAgents() {
         // 注册 LaTeX 智能助手 Agent
         const latexAssistant = new LaTeXAssistantAgent();
         window.ide.agentAPI.registerAgent(latexAssistant);
+        
+        // 注册 LaTeX Master Agent (基于 OpenAI)
+        const latexMaster = new LatexMasterAgent();
+        window.ide.agentAPI.registerAgent(latexMaster);
         
         console.log('Agent 系统初始化完成');
     } catch (error) {

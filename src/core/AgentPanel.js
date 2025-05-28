@@ -991,9 +991,377 @@ export class AgentPanel {
     /**
      * 显示设置
      */
-    showSettings() {
-        // 这里可以打开 Agent 设置对话框
-        alert('Agent 设置功能开发中...');
+    async showSettings() {
+        const activeAgent = this.agentAPI.activeAgent;
+        
+        if (!activeAgent) {
+            alert('请先选择一个 Agent');
+            return;
+        }
+        
+        // 如果是 LatexMaster Agent，显示 OpenAI 配置
+        if (activeAgent.id === 'latex-master-agent') {
+            await this.showLatexMasterSettings(activeAgent);
+        } else {
+            // 其他 Agent 的通用设置
+            this.showGenericSettings(activeAgent);
+        }
+    }
+    
+    /**
+     * 显示 LatexMaster Agent 的设置界面
+     */
+    async showLatexMasterSettings(agent) {
+        // 创建设置对话框
+        const modal = document.createElement('div');
+        modal.className = 'agent-settings-modal';
+        modal.innerHTML = `
+            <div class="modal-overlay">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h3>🤖 LaTeX Master 配置</h3>
+                        <button class="modal-close" onclick="this.closest('.agent-settings-modal').remove()">×</button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="setting-group">
+                            <label for="openai-api-key">OpenAI API Key:</label>
+                            <input type="password" id="openai-api-key" 
+                                   value="${agent.config.apiKey}" 
+                                   placeholder="sk-...">
+                            <small>您的 OpenAI API 密钥</small>
+                        </div>
+                        
+                        <div class="setting-group">
+                            <label for="openai-model">模型:</label>
+                            <select id="openai-model">
+                                <option value="gpt-4" ${agent.config.model === 'gpt-4' ? 'selected' : ''}>GPT-4</option>
+                                <option value="gpt-4-turbo" ${agent.config.model === 'gpt-4-turbo' ? 'selected' : ''}>GPT-4 Turbo</option>
+                                <option value="gpt-3.5-turbo" ${agent.config.model === 'gpt-3.5-turbo' ? 'selected' : ''}>GPT-3.5 Turbo</option>
+                            </select>
+                            <small>选择要使用的 OpenAI 模型</small>
+                        </div>
+                        
+                        <div class="setting-group">
+                            <label for="max-tokens">最大 Token 数:</label>
+                            <input type="number" id="max-tokens" 
+                                   value="${agent.config.maxTokens}" 
+                                   min="100" max="8000" step="100">
+                            <small>单次请求的最大 token 数量 (100-8000)</small>
+                        </div>
+                        
+                        <div class="setting-group">
+                            <label for="temperature">创造性 (Temperature):</label>
+                            <input type="range" id="temperature" 
+                                   value="${agent.config.temperature}" 
+                                   min="0" max="1" step="0.1">
+                            <span class="range-value">${agent.config.temperature}</span>
+                            <small>控制回答的创造性，0=保守，1=创新</small>
+                        </div>
+                        
+                        <div class="setting-group">
+                            <label for="base-url">API 基础 URL:</label>
+                            <input type="url" id="base-url" 
+                                   value="${agent.config.baseURL}" 
+                                   placeholder="https://api.openai.com/v1">
+                            <small>OpenAI API 的基础 URL（支持代理）</small>
+                        </div>
+                        
+                        <div class="setting-actions">
+                            <button class="btn-test" onclick="window.testOpenAIConnection()">🔗 测试连接</button>
+                            <button class="btn-reset" onclick="window.resetLatexMasterConfig()">🔄 重置默认</button>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn-cancel" onclick="this.closest('.agent-settings-modal').remove()">取消</button>
+                        <button class="btn-save" onclick="window.saveLatexMasterConfig()">保存配置</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        // 添加样式
+        if (!document.getElementById('agent-settings-styles')) {
+            const styles = document.createElement('style');
+            styles.id = 'agent-settings-styles';
+            styles.textContent = `
+                .agent-settings-modal {
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 100%;
+                    z-index: 2000;
+                }
+                
+                .modal-overlay {
+                    width: 100%;
+                    height: 100%;
+                    background: rgba(0, 0, 0, 0.5);
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                }
+                
+                .modal-content {
+                    background: white;
+                    border-radius: 8px;
+                    width: 500px;
+                    max-width: 90vw;
+                    max-height: 80vh;
+                    overflow: hidden;
+                    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+                }
+                
+                .modal-header {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    padding: 20px;
+                    border-bottom: 1px solid #eee;
+                    background: #f8f9fa;
+                }
+                
+                .modal-header h3 {
+                    margin: 0;
+                    color: #333;
+                }
+                
+                .modal-close {
+                    background: none;
+                    border: none;
+                    font-size: 24px;
+                    cursor: pointer;
+                    color: #666;
+                    padding: 0;
+                    width: 30px;
+                    height: 30px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                }
+                
+                .modal-body {
+                    padding: 20px;
+                    max-height: 60vh;
+                    overflow-y: auto;
+                }
+                
+                .setting-group {
+                    margin-bottom: 20px;
+                }
+                
+                .setting-group label {
+                    display: block;
+                    margin-bottom: 5px;
+                    font-weight: 600;
+                    color: #333;
+                }
+                
+                .setting-group input,
+                .setting-group select {
+                    width: 100%;
+                    padding: 8px 12px;
+                    border: 1px solid #ddd;
+                    border-radius: 4px;
+                    font-size: 14px;
+                }
+                
+                .setting-group input[type="range"] {
+                    width: calc(100% - 50px);
+                    display: inline-block;
+                }
+                
+                .range-value {
+                    display: inline-block;
+                    width: 40px;
+                    text-align: center;
+                    font-weight: bold;
+                    color: #007acc;
+                }
+                
+                .setting-group small {
+                    display: block;
+                    margin-top: 5px;
+                    color: #666;
+                    font-size: 12px;
+                }
+                
+                .setting-actions {
+                    display: flex;
+                    gap: 10px;
+                    margin-top: 20px;
+                    padding-top: 20px;
+                    border-top: 1px solid #eee;
+                }
+                
+                .btn-test,
+                .btn-reset {
+                    padding: 8px 16px;
+                    border: 1px solid #ddd;
+                    border-radius: 4px;
+                    background: white;
+                    cursor: pointer;
+                    font-size: 14px;
+                }
+                
+                .btn-test:hover {
+                    background: #e3f2fd;
+                    border-color: #2196f3;
+                }
+                
+                .btn-reset:hover {
+                    background: #fff3e0;
+                    border-color: #ff9800;
+                }
+                
+                .modal-footer {
+                    display: flex;
+                    justify-content: flex-end;
+                    gap: 10px;
+                    padding: 20px;
+                    border-top: 1px solid #eee;
+                    background: #f8f9fa;
+                }
+                
+                .btn-cancel,
+                .btn-save {
+                    padding: 10px 20px;
+                    border: none;
+                    border-radius: 4px;
+                    cursor: pointer;
+                    font-size: 14px;
+                    font-weight: 600;
+                }
+                
+                .btn-cancel {
+                    background: #6c757d;
+                    color: white;
+                }
+                
+                .btn-save {
+                    background: #007acc;
+                    color: white;
+                }
+                
+                .btn-cancel:hover {
+                    background: #5a6268;
+                }
+                
+                .btn-save:hover {
+                    background: #0056b3;
+                }
+            `;
+            document.head.appendChild(styles);
+        }
+        
+        // 添加到页面
+        document.body.appendChild(modal);
+        
+        // 设置温度滑块事件
+        const temperatureSlider = modal.querySelector('#temperature');
+        const temperatureValue = modal.querySelector('.range-value');
+        temperatureSlider.addEventListener('input', (e) => {
+            temperatureValue.textContent = e.target.value;
+        });
+        
+        // 存储当前 agent 引用供全局函数使用
+        window.currentConfigAgent = agent;
+        
+        // 全局函数：保存配置
+        window.saveLatexMasterConfig = () => {
+            const apiKey = modal.querySelector('#openai-api-key').value;
+            const model = modal.querySelector('#openai-model').value;
+            const maxTokens = parseInt(modal.querySelector('#max-tokens').value);
+            const temperature = parseFloat(modal.querySelector('#temperature').value);
+            const baseURL = modal.querySelector('#base-url').value;
+            
+            // 验证输入
+            if (!apiKey.trim()) {
+                alert('请输入 API Key');
+                return;
+            }
+            
+            if (maxTokens < 100 || maxTokens > 8000) {
+                alert('Token 数量必须在 100-8000 之间');
+                return;
+            }
+            
+            // 更新配置
+            agent.config.apiKey = apiKey;
+            agent.config.model = model;
+            agent.config.maxTokens = maxTokens;
+            agent.config.temperature = temperature;
+            agent.config.baseURL = baseURL;
+            
+            // 保存到本地存储
+            agent.setConfig('latexMaster', agent.config);
+            
+            // 更新输出通道
+            if (agent.outputChannel) {
+                agent.outputChannel.appendLine('✅ 配置已保存');
+            }
+            
+            // 关闭对话框
+            modal.remove();
+            
+            // 显示成功消息
+            this.addMessage('system', '✅ LaTeX Master 配置已保存');
+        };
+        
+        // 全局函数：重置配置
+        window.resetLatexMasterConfig = () => {
+            if (confirm('确定要重置为默认配置吗？')) {
+                modal.querySelector('#openai-api-key').value = '';
+                modal.querySelector('#openai-model').value = 'gpt-4';
+                modal.querySelector('#max-tokens').value = '4000';
+                modal.querySelector('#temperature').value = '0.7';
+                modal.querySelector('#base-url').value = 'https://api.openai.com/v1';
+                temperatureValue.textContent = '0.7';
+            }
+        };
+        
+        // 全局函数：测试连接
+        window.testOpenAIConnection = async () => {
+            const apiKey = modal.querySelector('#openai-api-key').value;
+            const baseURL = modal.querySelector('#base-url').value;
+            
+            if (!apiKey.trim()) {
+                alert('请先输入 API Key');
+                return;
+            }
+            
+            const testBtn = modal.querySelector('.btn-test');
+            const originalText = testBtn.textContent;
+            testBtn.textContent = '🔄 测试中...';
+            testBtn.disabled = true;
+            
+            try {
+                const response = await fetch(`${baseURL}/models`, {
+                    headers: {
+                        'Authorization': `Bearer ${apiKey}`
+                    }
+                });
+                
+                if (response.ok) {
+                    alert('✅ 连接成功！API Key 有效。');
+                } else {
+                    const error = await response.json();
+                    alert(`❌ 连接失败: ${error.error?.message || response.statusText}`);
+                }
+            } catch (error) {
+                alert(`❌ 连接失败: ${error.message}`);
+            } finally {
+                testBtn.textContent = originalText;
+                testBtn.disabled = false;
+            }
+        };
+    }
+    
+    /**
+     * 显示通用 Agent 设置
+     */
+    showGenericSettings(agent) {
+        alert(`${agent.name} 的设置功能开发中...`);
     }
 
     /**
