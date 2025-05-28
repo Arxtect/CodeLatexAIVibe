@@ -3643,7 +3643,11 @@ export class AgentPanelPlugin {
                 return `📁 移动文件: ${args.source || '未指定'} → ${args.target || '未指定'}`;
             case 'compile':
                 return `🔨 编译文件: ${args.target || args.file_path || '未指定'}`;
-                
+            case 'mkdir':
+                return `📁 创建目录: ${args.target || args.dir_path || '未指定'}`;
+            case 'rmdir':
+                return `🗂️ 删除目录: ${args.target || args.dir_path || '未指定'}`;
+            
             default:
                 // 对于未知的工具调用，尝试从参数中提取有用信息
                 const paramInfo = Object.keys(args).length > 0 ? 

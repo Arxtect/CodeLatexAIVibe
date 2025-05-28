@@ -932,7 +932,9 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
             'edit', 
             'delete',
             'move',
-            'compile'
+            'compile',
+            'mkdir',
+            'rmdir'
         ];
         return writeOperations.includes(operationType);
     }
@@ -976,6 +978,12 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
             case 'compile':
                 return this.createCompileAction(operation.target);
                 
+            case 'mkdir':
+                return this.createMkdirAction(operation.target);
+                
+            case 'rmdir':
+                return this.createRmdirAction(operation.target);
+                
             default:
                 this.log('warn', `未知的操作类型: ${operation.type}`);
                 return null;
@@ -991,7 +999,8 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
         try {
             switch (action.type) {
                 case 'create':
-                    // 创建文件
+                    // 创建文件，自动创建所需目录
+                    await this.ensureDirectoryExists(action.target);
                     await window.ide.fileSystem.writeFile(action.target, action.content || '');
                     this.log('info', `文件创建成功: ${action.target}`);
                     
@@ -1001,9 +1010,21 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                     }
                     break;
                     
+                case 'mkdir':
+                    // 创建目录
+                    await this.ensureDirectoryExists(action.target, true);
+                    this.log('info', `目录创建成功: ${action.target}`);
+                    
+                    // 更新文件浏览器
+                    if (window.ide.updateFileTree) {
+                        window.ide.updateFileTree();
+                    }
+                    break;
+                    
                 case 'edit':
-                    // 编辑文件
+                    // 编辑文件，如果文件不存在则创建
                     if (action.editType === 'replace') {
+                        await this.ensureDirectoryExists(action.target);
                         await window.ide.fileSystem.writeFile(action.target, action.content || '');
                     } else if (action.editType === 'insert') {
                         // 读取现有内容，插入新内容
@@ -1012,6 +1033,7 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                             existingContent = await window.ide.fileSystem.readFile(action.target);
                         } catch (error) {
                             // 文件不存在，创建新文件
+                            await this.ensureDirectoryExists(action.target);
                             existingContent = '';
                         }
                         
@@ -1055,8 +1077,20 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                     }
                     break;
                     
+                case 'rmdir':
+                    // 删除目录
+                    await window.ide.fileSystem.rmdir(action.target);
+                    this.log('info', `目录删除成功: ${action.target}`);
+                    
+                    // 更新文件浏览器
+                    if (window.ide.updateFileTree) {
+                        window.ide.updateFileTree();
+                    }
+                    break;
+                    
                 case 'move':
                     // 移动/重命名文件
+                    await this.ensureDirectoryExists(action.target);
                     await window.ide.fileSystem.rename(action.source, action.target);
                     this.log('info', `文件移动成功: ${action.source} -> ${action.target}`);
                     
@@ -1089,6 +1123,53 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
             return true;
         } catch (error) {
             this.log('error', `动作执行失败: ${action.type}`, error);
+            throw error;
+        }
+    }
+    
+    /**
+     * 确保目录存在，如果不存在则创建
+     */
+    async ensureDirectoryExists(filePath, isDirectory = false) {
+        try {
+            let dirPath;
+            if (isDirectory) {
+                // 如果是目录路径
+                dirPath = filePath;
+            } else {
+                // 如果是文件路径，提取目录部分
+                const pathParts = filePath.split('/');
+                pathParts.pop(); // 移除文件名
+                dirPath = pathParts.join('/');
+            }
+            
+            // 如果是根目录或空路径，不需要创建
+            if (!dirPath || dirPath === '/' || dirPath === '') {
+                return;
+            }
+            
+            // 检查目录是否存在
+            try {
+                const stats = await window.ide.fileSystem.stat(dirPath);
+                if (stats.isDirectory()) {
+                    return; // 目录已存在
+                }
+            } catch (error) {
+                // 目录不存在，需要创建
+            }
+            
+            // 递归创建父目录
+            const parentPath = dirPath.split('/').slice(0, -1).join('/');
+            if (parentPath && parentPath !== '/') {
+                await this.ensureDirectoryExists(parentPath, true);
+            }
+            
+            // 创建当前目录
+            await window.ide.fileSystem.mkdir(dirPath);
+            this.log('info', `目录创建成功: ${dirPath}`);
+            
+        } catch (error) {
+            this.log('error', `创建目录失败: ${filePath}`, error);
             throw error;
         }
     }
@@ -1920,6 +2001,32 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
             command: command
         });
     }
+
+    /**
+     * 创建目录动作
+     */
+    createMkdirAction(dirPath) {
+        return {
+            type: 'mkdir',
+            target: dirPath,
+            description: `创建目录: ${dirPath}`,
+            timestamp: new Date().toISOString(),
+            agentId: this.id
+        };
+    }
+
+    /**
+     * 删除目录动作
+     */
+    createRmdirAction(dirPath) {
+        return {
+            type: 'rmdir',
+            target: dirPath,
+            description: `删除目录: ${dirPath}`,
+            timestamp: new Date().toISOString(),
+            agentId: this.id
+        };
+    }
     
     /**
      * 处理 Agent 消息钩子
@@ -2195,6 +2302,8 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
 - \`edit\`: 编辑现有文件（支持replace/insert/delete）
 - \`delete\`: 删除文件
 - \`move\`: 移动/重命名文件
+- \`mkdir\`: 创建目录
+- \`rmdir\`: 删除目录
 - \`compile\`: 编译LaTeX文档
 
 **3. 任务完成（complete_task）**
@@ -2414,6 +2523,8 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
 - \`edit\`: 编辑现有文件（支持replace/insert/delete）
 - \`delete\`: 删除文件
 - \`move\`: 移动/重命名文件
+- \`mkdir\`: 创建目录
+- \`rmdir\`: 删除目录
 - \`compile\`: 编译LaTeX文档
 
 **决策原则：**
