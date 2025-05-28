@@ -2509,7 +2509,7 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
 \`\`\`
 
 **可用的操作类型：**
-- \`create\`: 创建新文件
+- \`create\`: 创建新文件（如果文件不存在会自动创建目录）
 - \`edit\`: 编辑现有文件（支持replace/insert/delete）
 - \`delete\`: 删除文件
 - \`move\`: 移动/重命名文件
@@ -2522,12 +2522,20 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
 2. 如果需要搜索特定内容但不知道在哪个文件 → 使用工具调用
 3. 如果有足够信息可以执行具体操作 → 在回答中包含操作指令
 4. 如果只是回答问题或提供建议 → 直接回答
+5. **如果任务已完成或无需进一步操作 → 直接回答并总结完成情况**
+
+**完成条件（重要）：**
+- 当你已经完成了用户请求的所有操作时，直接回答总结结果，不要继续调用工具或执行操作
+- 当你已经提供了用户需要的信息或建议时，直接回答，不要继续获取更多信息
+- 当用户的问题是简单的询问时，直接回答，不需要文件操作
+- 避免重复执行相同的操作或获取相同的信息
 
 **重要：**
 - 工具调用只能用于读取信息，不能修改文件
 - 操作指令只能用于修改文件，不能读取信息
 - 你可以在多轮对话中灵活切换这两种模式
-- 每次的结果都会作为上下文提供给你，帮助你做出更好的决策`;
+- 每次的结果都会作为上下文提供给你，帮助你做出更好的决策
+- **一旦任务完成，立即停止并总结结果，不要继续循环**`;
     }
 
     /**
@@ -2578,22 +2586,79 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
         
         message += '\n';
         
-        // 添加对话历史摘要
+        // 添加详细的执行历史
         if (conversationHistory && conversationHistory.length > 0) {
-            message += `**执行历史：**\n`;
+            message += `**详细执行历史：**\n`;
+            
+            // 统计已执行的操作
+            const executedOperations = new Set();
+            const readFiles = new Set();
+            
             conversationHistory.forEach((entry, index) => {
                 message += `${index + 1}. [${entry.type}] `;
+                
                 if (entry.type === 'tool_calls') {
                     const toolCount = entry.response.content?.tool_calls?.length || 0;
                     const successCount = Object.keys(entry.result.results || {}).length;
                     message += `工具调用 (${successCount}/${toolCount} 成功)\n`;
+                    
+                    // 记录已读取的文件
+                    if (entry.result.results) {
+                        Object.keys(entry.result.results).forEach(toolName => {
+                            if (toolName === 'read_file') {
+                                const result = entry.result.results[toolName];
+                                if (result.success && result.filePath) {
+                                    readFiles.add(result.filePath);
+                                }
+                            }
+                        });
+                    }
+                    
                 } else if (entry.type === 'execute_operations') {
                     const { completedSteps, totalSteps } = entry.result;
                     message += `执行操作 (${completedSteps}/${totalSteps} 完成)\n`;
+                    
+                    // 记录已执行的操作
+                    if (entry.plan && entry.plan.operations) {
+                        entry.plan.operations.forEach(op => {
+                            const opKey = `${op.type}:${op.target || op.source}`;
+                            executedOperations.add(opKey);
+                        });
+                    }
+                    
+                    // 详细列出执行的操作
+                    if (entry.plan && entry.plan.operations) {
+                        entry.plan.operations.forEach((op, opIndex) => {
+                            message += `   ${opIndex + 1}. ${op.type}: ${op.target || op.source} - ${op.description}\n`;
+                        });
+                    }
                 }
             });
+            
+            // 添加防重复提醒
+            if (executedOperations.size > 0) {
+                message += `\n**已执行的操作（请勿重复）：**\n`;
+                Array.from(executedOperations).forEach(op => {
+                    message += `- ${op}\n`;
+                });
+            }
+            
+            if (readFiles.size > 0) {
+                message += `\n**已读取的文件（信息已获取）：**\n`;
+                Array.from(readFiles).forEach(file => {
+                    message += `- ${file}\n`;
+                });
+            }
+            
             message += '\n';
         }
+        
+        // 添加明确的完成检查
+        message += `**重要提醒：**\n`;
+        message += `- 如果用户的需求已经通过上述操作完成，请直接总结结果，不要继续执行\n`;
+        message += `- 如果已经获取了足够的信息来回答用户问题，请直接回答，不要继续获取信息\n`;
+        message += `- 避免重复执行相同的操作或读取相同的文件\n`;
+        message += `- 如果任务已完成，请明确说明完成情况并停止\n\n`;
         
         message += `**请基于上述信息，选择合适的方式处理用户需求。**`;
         
