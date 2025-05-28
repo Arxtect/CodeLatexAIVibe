@@ -317,20 +317,60 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                 return this.createResponse('🔄 正在执行任务中，请稍候...');
             }
             
+            this.log('info', `开始处理消息: ${message}`);
             this.log('info', `用户请求: ${message}`);
             
             // 收集初始上下文
             let fullContext = await this.collectContext(message, context);
             
             // 初始化循环控制
-            let maxIterations = 15; // 防止无限循环，支持更复杂的任务
+            let maxIterations = 15; // 初始软限制
             let iteration = 0;
             let conversationHistory = []; // 存储整个对话历史
             let accumulatedContext = { ...fullContext }; // 累积的上下文信息
             
-            while (iteration < maxIterations) {
+            while (true) { // 改为无限循环，通过用户确认控制
                 iteration++;
                 this.log('info', `处理迭代 ${iteration}/${maxIterations}`);
+                
+                // 检查是否达到软限制
+                if (iteration > maxIterations) {
+                    this.log('warn', `达到迭代软限制 ${maxIterations}，请求用户确认`);
+                    
+                    // 创建确认消息
+                    const confirmMessage = `⚠️ 任务处理已进行 ${maxIterations} 轮迭代，可能比较复杂。\n\n` +
+                        `当前进度：\n` +
+                        `- 已完成 ${conversationHistory.length} 个阶段\n` +
+                        `- 信息收集阶段: ${conversationHistory.filter(h => h.type === 'gather_info').length} 次\n` +
+                        `- 操作执行阶段: ${conversationHistory.filter(h => h.type === 'execute_operations').length} 次\n\n` +
+                        `是否继续处理？\n` +
+                        `• 点击"继续"将重置计数器并继续执行\n` +
+                        `• 点击"停止"将结束当前任务`;
+                    
+                    // 通过UI显示确认对话框
+                    const shouldContinue = await this.showIterationConfirmDialog(confirmMessage, iteration);
+                    
+                    if (!shouldContinue) {
+                        this.log('info', '用户选择停止处理');
+                        return this.createResponse(
+                            `⏹️ 任务已停止\n\n` +
+                            `处理摘要：\n` +
+                            `- 总迭代次数: ${iteration - 1}\n` +
+                            `- 信息收集: ${conversationHistory.filter(h => h.type === 'gather_info').length} 次\n` +
+                            `- 操作执行: ${conversationHistory.filter(h => h.type === 'execute_operations').length} 次\n\n` +
+                            `任务可能已部分完成，请检查结果。如需继续，请重新发送请求。`
+                        );
+                    }
+                    
+                    // 用户选择继续，重置计数器并增加限制
+                    this.log('info', '用户选择继续，重置迭代计数器');
+                    maxIterations += 10; // 每次重置增加10次迭代机会
+                    
+                    // 显示继续处理的消息
+                    if (onStream) {
+                        onStream(`\n🔄 继续处理任务 (迭代 ${iteration})...\n`, '');
+                    }
+                }
                 
                 // 调用大语言模型进行决策
                 const decision = await this.makeDecision(message, accumulatedContext, conversationHistory, onStream);
@@ -379,7 +419,13 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                     this.log('info', '任务完成');
                     
                     // 任务完成，返回最终结果
-                    return this.createResponse(`✅ ${decision.message || '任务已完成'}`);
+                    const finalMessage = `✅ ${decision.message || '任务已完成'}\n\n` +
+                        `处理摘要：\n` +
+                        `- 总迭代次数: ${iteration}\n` +
+                        `- 信息收集: ${conversationHistory.filter(h => h.type === 'gather_info').length} 次\n` +
+                        `- 操作执行: ${conversationHistory.filter(h => h.type === 'execute_operations').length} 次`;
+                    
+                    return this.createResponse(finalMessage);
                     
                 } else if (decision.type === 'direct_response') {
                     this.log('info', '直接响应');
@@ -393,14 +439,189 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                 }
             }
             
-            // 如果达到最大迭代次数，返回警告
-            this.log('warn', `达到最大迭代次数 ${maxIterations}，停止处理`);
-            return this.createResponse('⚠️ 处理过程过长，已自动停止。任务可能已部分完成，请检查结果或尝试简化您的请求。');
-            
         } catch (error) {
             this.handleError(error, 'processMessage');
             return this.createResponse(`❌ 处理失败: ${error.message}`);
         }
+    }
+    
+    /**
+     * 显示迭代确认对话框
+     */
+    async showIterationConfirmDialog(message, currentIteration) {
+        return new Promise((resolve) => {
+            // 创建模态对话框
+            const modal = document.createElement('div');
+            modal.className = 'iteration-confirm-modal';
+            modal.innerHTML = `
+                <div class="iteration-confirm-overlay">
+                    <div class="iteration-confirm-dialog">
+                        <div class="iteration-confirm-header">
+                            <h3>🔄 任务处理确认</h3>
+                        </div>
+                        <div class="iteration-confirm-content">
+                            <div class="iteration-confirm-message">${message.replace(/\n/g, '<br>')}</div>
+                        </div>
+                        <div class="iteration-confirm-actions">
+                            <button class="iteration-confirm-btn iteration-confirm-continue">
+                                🚀 继续处理
+                            </button>
+                            <button class="iteration-confirm-btn iteration-confirm-stop">
+                                ⏹️ 停止任务
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            // 添加样式
+            const style = document.createElement('style');
+            style.textContent = `
+                .iteration-confirm-modal {
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 100%;
+                    z-index: 10000;
+                }
+                
+                .iteration-confirm-overlay {
+                    position: absolute;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 100%;
+                    background: rgba(0, 0, 0, 0.7);
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    backdrop-filter: blur(4px);
+                }
+                
+                .iteration-confirm-dialog {
+                    background: #2d2d30;
+                    border: 1px solid #464647;
+                    border-radius: 8px;
+                    max-width: 500px;
+                    width: 90%;
+                    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+                    animation: slideIn 0.3s ease-out;
+                }
+                
+                @keyframes slideIn {
+                    from {
+                        opacity: 0;
+                        transform: translateY(-20px) scale(0.95);
+                    }
+                    to {
+                        opacity: 1;
+                        transform: translateY(0) scale(1);
+                    }
+                }
+                
+                .iteration-confirm-header {
+                    padding: 20px 24px 16px;
+                    border-bottom: 1px solid #464647;
+                }
+                
+                .iteration-confirm-header h3 {
+                    margin: 0;
+                    color: #cccccc;
+                    font-size: 18px;
+                    font-weight: 600;
+                }
+                
+                .iteration-confirm-content {
+                    padding: 20px 24px;
+                }
+                
+                .iteration-confirm-message {
+                    color: #d4d4d4;
+                    line-height: 1.6;
+                    font-size: 14px;
+                    white-space: pre-wrap;
+                }
+                
+                .iteration-confirm-actions {
+                    padding: 16px 24px 24px;
+                    display: flex;
+                    gap: 12px;
+                    justify-content: flex-end;
+                }
+                
+                .iteration-confirm-btn {
+                    padding: 10px 20px;
+                    border: none;
+                    border-radius: 4px;
+                    font-size: 14px;
+                    font-weight: 500;
+                    cursor: pointer;
+                    transition: all 0.2s ease;
+                    min-width: 120px;
+                }
+                
+                .iteration-confirm-continue {
+                    background: #0e639c;
+                    color: white;
+                }
+                
+                .iteration-confirm-continue:hover {
+                    background: #1177bb;
+                    transform: translateY(-1px);
+                }
+                
+                .iteration-confirm-stop {
+                    background: #6c757d;
+                    color: white;
+                }
+                
+                .iteration-confirm-stop:hover {
+                    background: #5a6268;
+                    transform: translateY(-1px);
+                }
+            `;
+            
+            document.head.appendChild(style);
+            document.body.appendChild(modal);
+            
+            // 绑定事件
+            const continueBtn = modal.querySelector('.iteration-confirm-continue');
+            const stopBtn = modal.querySelector('.iteration-confirm-stop');
+            
+            const cleanup = () => {
+                document.body.removeChild(modal);
+                document.head.removeChild(style);
+            };
+            
+            continueBtn.addEventListener('click', () => {
+                cleanup();
+                resolve(true);
+            });
+            
+            stopBtn.addEventListener('click', () => {
+                cleanup();
+                resolve(false);
+            });
+            
+            // ESC键关闭（默认停止）
+            const handleKeydown = (e) => {
+                if (e.key === 'Escape') {
+                    cleanup();
+                    document.removeEventListener('keydown', handleKeydown);
+                    resolve(false);
+                }
+            };
+            document.addEventListener('keydown', handleKeydown);
+            
+            // 点击遮罩关闭（默认停止）
+            modal.querySelector('.iteration-confirm-overlay').addEventListener('click', (e) => {
+                if (e.target === e.currentTarget) {
+                    cleanup();
+                    resolve(false);
+                }
+            });
+        });
     }
     
     /**
