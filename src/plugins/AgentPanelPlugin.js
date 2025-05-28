@@ -3403,7 +3403,7 @@ export class AgentPanelPlugin {
                 color: 'blue'
             },
             execution: {
-                className: 'execution-task-panel',
+                className: 'tool-call-panel execution-task-panel',
                 title: '🚀 执行任务',
                 color: 'purple'
             }
@@ -3415,6 +3415,8 @@ export class AgentPanelPlugin {
         const panel = document.createElement('div');
         panel.className = `${theme.className} ${theme.color}-theme`;
         panel.id = toolCallId;
+        
+        console.log(`创建面板: type=${type}, className=${panel.className}, theme=`, theme);
         
         // 构建步骤HTML
         const stepsHtml = toolCalls.map((toolCall, index) => {

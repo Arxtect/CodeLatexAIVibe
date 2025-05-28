@@ -1138,12 +1138,12 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                 dirPath = filePath;
             } else {
                 // 如果是文件路径，提取目录部分
-                const pathParts = filePath.split('/');
+                const pathParts = filePath.split('/').filter(part => part !== '');
                 pathParts.pop(); // 移除文件名
-                dirPath = pathParts.join('/');
+                dirPath = pathParts.length > 0 ? '/' + pathParts.join('/') : '/';
             }
             
-            // 如果是根目录或空路径，不需要创建
+            // 如果是根目录，不需要创建
             if (!dirPath || dirPath === '/' || dirPath === '') {
                 return;
             }
@@ -1152,21 +1152,35 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
             try {
                 const stats = await window.ide.fileSystem.stat(dirPath);
                 if (stats.isDirectory()) {
+                    this.log('info', `目录已存在: ${dirPath}`);
                     return; // 目录已存在
                 }
             } catch (error) {
                 // 目录不存在，需要创建
+                this.log('info', `目录不存在，需要创建: ${dirPath}`);
             }
             
-            // 递归创建父目录
-            const parentPath = dirPath.split('/').slice(0, -1).join('/');
-            if (parentPath && parentPath !== '/') {
-                await this.ensureDirectoryExists(parentPath, true);
+            // 递归创建父目录（防止无限递归）
+            const pathParts = dirPath.split('/').filter(part => part !== '');
+            if (pathParts.length > 1) {
+                const parentPath = '/' + pathParts.slice(0, -1).join('/');
+                if (parentPath !== dirPath && parentPath !== '/') {
+                    await this.ensureDirectoryExists(parentPath, true);
+                }
             }
             
             // 创建当前目录
-            await window.ide.fileSystem.mkdir(dirPath);
-            this.log('info', `目录创建成功: ${dirPath}`);
+            try {
+                await window.ide.fileSystem.mkdir(dirPath);
+                this.log('info', `目录创建成功: ${dirPath}`);
+            } catch (error) {
+                // 如果目录已存在，忽略错误
+                if (error.code === 'EEXIST' || error.message.includes('exists')) {
+                    this.log('info', `目录已存在（创建时发现）: ${dirPath}`);
+                    return;
+                }
+                throw error;
+            }
             
         } catch (error) {
             this.log('error', `创建目录失败: ${filePath}`, error);
