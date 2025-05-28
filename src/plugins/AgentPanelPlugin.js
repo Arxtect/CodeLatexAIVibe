@@ -96,9 +96,8 @@ export class AgentPanelPlugin {
                         <div class="context-header">
                             <span class="context-title">📎 上下文</span>
                             <div class="context-controls">
-                                <button class="btn-context" id="add-selection-btn" title="添加选中内容">➕ 选中</button>
-                                <button class="btn-context" id="add-file-btn" title="添加文件">📄 文件</button>
-                                <button class="btn-context" id="add-folder-btn" title="添加文件夹">📁 文件夹</button>
+                                <button class="btn-context" id="add-selection-btn" title="添加选中内容">📝 选中</button>
+                                <button class="btn-context" id="add-file-folder-btn" title="添加文件/文件夹">📁 文件</button>
                                 <button class="btn-context" id="clear-context-btn" title="清空上下文">🗑️</button>
                             </div>
                         </div>
@@ -747,12 +746,8 @@ export class AgentPanelPlugin {
             this.addSelectionToContext();
         });
         
-        this.panel.querySelector('#add-file-btn').addEventListener('click', () => {
-            this.addCurrentFileToContext();
-        });
-        
-        this.panel.querySelector('#add-folder-btn').addEventListener('click', () => {
-            this.showFolderSelector();
+        this.panel.querySelector('#add-file-folder-btn').addEventListener('click', () => {
+            this.showFileSelector();
         });
         
         this.panel.querySelector('#clear-context-btn').addEventListener('click', () => {
@@ -1365,58 +1360,105 @@ export class AgentPanelPlugin {
     }
     
     /**
-     * 显示文件选择器
+     * 显示文件/文件夹选择器
      */
     async showFileSelector() {
         try {
-            const files = await this.getProjectFiles();
-            const fileList = files.filter(f => f.type === 'file');
+            // 如果有当前文件，优先添加当前文件
+            if (window.ide && window.ide.currentFile) {
+                const addCurrentFile = confirm('是否添加当前打开的文件到上下文？\n\n点击"确定"添加当前文件，点击"取消"选择其他文件/文件夹。');
+                if (addCurrentFile) {
+                    await this.addCurrentFileToContext();
+                    return;
+                }
+            }
             
-            if (fileList.length === 0) {
-                alert('项目中没有文件');
+            const files = await this.getProjectFiles();
+            
+            if (files.length === 0) {
+                alert('项目中没有文件或文件夹');
                 return;
             }
             
-            const selectedFile = await this.showSelectionModal('选择文件', fileList, 'file');
-            if (selectedFile) {
-                const content = await window.ide.fileSystem.readFile(selectedFile.path, 'utf8');
-                
-                // 检查文件大小
-                const maxFileSize = 1024 * 1024; // 1MB 限制
-                const maxPreviewLength = 2000; // 预览最大长度
-                
-                if (content.length > maxFileSize) {
-                    const shouldContinue = confirm(
-                        `文件 "${selectedFile.path}" 较大 (${Math.round(content.length / 1024)}KB)，` +
-                        `可能影响性能。是否继续添加？\n\n` +
-                        `建议：选择文件的关键部分而不是整个文件。`
-                    );
-                    if (!shouldContinue) {
-                        return;
+            // 分类文件和文件夹
+            const fileList = files.filter(f => f.type === 'file');
+            const folderList = files.filter(f => f.type === 'directory');
+            
+            // 合并列表，文件夹在前
+            const allItems = [
+                ...folderList.map(f => ({ ...f, displayType: '📁 文件夹' })),
+                ...fileList.map(f => ({ ...f, displayType: '📄 文件' }))
+            ];
+            
+            const selectedItem = await this.showSelectionModal('选择文件或文件夹', allItems, 'file-folder');
+            if (selectedItem) {
+                if (selectedItem.type === 'directory') {
+                    // 添加文件夹
+                    const files = await this.scanFolder(selectedItem.path, new Set(), 0, 8);
+                    const fileList = files.map(f => f.path).join('\n');
+                    
+                    this.addContextItem({
+                        type: 'folder',
+                        name: selectedItem.path,
+                        content: fileList,
+                        preview: `包含 ${files.length} 个文件`,
+                        files: files
+                    });
+                } else {
+                    // 添加文件
+                    const content = await window.ide.fileSystem.readFile(selectedItem.path, 'utf8');
+                    
+                    // 获取性能设置
+                    const performanceSettings = window.ide?.settingsManager?.get('performance') || {};
+                    const maxFileSize = performanceSettings.contextFileLimit || 1024 * 1024; // 1MB 默认
+                    const previewLength = performanceSettings.previewLength || 2000;
+                    
+                    // 检查文件大小
+                    if (content.length > maxFileSize) {
+                        const shouldContinue = confirm(
+                            `文件 "${selectedItem.path}" 较大 (${Math.round(content.length / 1024)}KB)，` +
+                            `超过设置的限制 (${Math.round(maxFileSize / 1024)}KB)。\n\n` +
+                            `是否继续添加？建议：选择文件的关键部分而不是整个文件。`
+                        );
+                        if (!shouldContinue) {
+                            return;
+                        }
                     }
+                    
+                    // 创建上下文项目
+                    const contextItem = {
+                        type: 'file',
+                        name: selectedItem.path,
+                        content: content,
+                        size: content.length,
+                        truncated: false
+                    };
+                    
+                    // 如果启用分段加载且内容较大，使用分段显示
+                    const enableChunkedLoading = performanceSettings.enableChunkedLoading !== false;
+                    if (enableChunkedLoading && content.length > previewLength) {
+                        const chunkedData = this.createChunkedContent(contextItem, performanceSettings);
+                        contextItem.chunkedData = chunkedData;
+                        contextItem.preview = chunkedData.displayContent;
+                        contextItem.truncated = chunkedData.hasMore;
+                    } else {
+                        // 使用简单截断
+                        contextItem.preview = content.length > previewLength 
+                            ? content.substring(0, previewLength) + `\n\n... (文件较大，已截断，总长度: ${content.length} 字符)`
+                            : content;
+                        contextItem.truncated = content.length > previewLength;
+                    }
+                    
+                    this.addContextItem(contextItem);
                 }
-                
-                // 截断过长的内容用于预览
-                const truncatedContent = content.length > maxPreviewLength 
-                    ? content.substring(0, maxPreviewLength) + `\n\n... (文件太大，已截断，总长度: ${content.length} 字符)`
-                    : content;
-                
-                this.addContextItem({
-                    type: 'file',
-                    name: selectedFile.path,
-                    content: content,
-                    preview: truncatedContent,
-                    size: content.length,
-                    truncated: content.length > maxPreviewLength
-                });
                 
                 if (!this.isVisible) {
                     this.show();
                 }
             }
         } catch (error) {
-            console.error('显示文件选择器失败:', error);
-            alert('显示文件选择器失败: ' + error.message);
+            console.error('显示文件/文件夹选择器失败:', error);
+            alert('显示文件/文件夹选择器失败: ' + error.message);
         }
     }
     
@@ -1541,12 +1583,19 @@ export class AgentPanelPlugin {
                         </div>
                         <div class="modal-body">
                             <div class="file-list">
-                                ${items.map(item => `
-                                    <div class="file-list-item" data-path="${item.path}">
-                                        <span class="file-icon">${type === 'file' ? '📄' : '📁'}</span>
-                                        <span class="file-path">${item.path}</span>
-                                    </div>
-                                `).join('')}
+                                ${items.map(item => {
+                                    const icon = item.type === 'directory' ? '📁' : '📄';
+                                    const typeLabel = item.displayType || (item.type === 'directory' ? '文件夹' : '文件');
+                                    return `
+                                        <div class="file-list-item" data-path="${item.path}">
+                                            <span class="file-icon">${icon}</span>
+                                            <div class="file-info">
+                                                <span class="file-path">${item.path}</span>
+                                                <span class="file-type">${typeLabel}</span>
+                                            </div>
+                                        </div>
+                                    `;
+                                }).join('')}
                             </div>
                         </div>
                         <div class="modal-footer">
@@ -1688,11 +1737,24 @@ export class AgentPanelPlugin {
                 flex-shrink: 0;
             }
             
-            .file-path {
+            .file-info {
                 flex: 1;
-                font-family: monospace;
+                display: flex;
+                flex-direction: column;
+                gap: 2px;
+                min-width: 0;
+            }
+            
+            .file-path {
                 font-size: 14px;
                 color: #333;
+                word-break: break-all;
+            }
+            
+            .file-type {
+                font-size: 12px;
+                color: #666;
+                opacity: 0.8;
             }
             
             .file-selector-modal .modal-footer {

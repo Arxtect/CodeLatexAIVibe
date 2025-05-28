@@ -373,9 +373,10 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // 初始化右键菜单
+let currentContextTarget = null;
+
 function initContextMenu() {
     const contextMenu = document.getElementById('contextMenu');
-    let currentContextTarget = null;
     
     // 监听右键事件
     document.addEventListener('contextmenu', (e) => {

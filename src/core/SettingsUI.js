@@ -625,6 +625,7 @@ export class SettingsUI {
         this.loadEditorSettings();
         this.loadUISettings();
         this.loadVersionSettings();
+        this.loadPerformanceSettings();
     }
 
     open() {
@@ -846,9 +847,11 @@ export class SettingsUI {
             this.settingsManager.set('performance', defaultSettings);
             
             // 重新加载性能设置界面
-            const content = document.querySelector('.settings-content');
-            content.innerHTML = this.createPerformanceContent();
-            this.setupPerformanceEventListeners();
+            const performanceTab = document.getElementById('performance-tab');
+            if (performanceTab) {
+                performanceTab.innerHTML = this.createPerformanceContent();
+                this.setupPerformanceEventListeners();
+            }
             
             this.showNotification('性能设置已重置为默认值', 'success');
         }
@@ -954,9 +957,83 @@ export class SettingsUI {
         return isValid;
     }
 
+    /**
+     * 显示通知消息
+     */
+    showNotification(message, type = 'info') {
+        // 创建通知元素
+        const notification = document.createElement('div');
+        notification.className = `settings-notification notification-${type}`;
+        notification.textContent = message;
+        
+        // 添加样式
+        notification.style.cssText = `
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 12px 16px;
+            border-radius: 4px;
+            color: white;
+            font-size: 14px;
+            z-index: 10001;
+            max-width: 300px;
+            word-wrap: break-word;
+            animation: slideInRight 0.3s ease-out;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        `;
+        
+        // 根据类型设置背景色
+        switch (type) {
+            case 'success':
+                notification.style.backgroundColor = '#28a745';
+                break;
+            case 'warning':
+                notification.style.backgroundColor = '#ffc107';
+                notification.style.color = '#212529';
+                break;
+            case 'error':
+                notification.style.backgroundColor = '#dc3545';
+                break;
+            default:
+                notification.style.backgroundColor = '#17a2b8';
+        }
+        
+        // 添加到页面
+        document.body.appendChild(notification);
+        
+        // 3秒后自动移除
+        setTimeout(() => {
+            notification.style.animation = 'slideOutRight 0.3s ease-in';
+            setTimeout(() => {
+                if (notification.parentNode) {
+                    notification.parentNode.removeChild(notification);
+                }
+            }, 300);
+        }, 3000);
+        
+        // 添加动画样式（如果还没有）
+        if (!document.getElementById('settings-notification-styles')) {
+            const styles = document.createElement('style');
+            styles.id = 'settings-notification-styles';
+            styles.textContent = `
+                @keyframes slideInRight {
+                    from { transform: translateX(100%); opacity: 0; }
+                    to { transform: translateX(0); opacity: 1; }
+                }
+                @keyframes slideOutRight {
+                    from { transform: translateX(0); opacity: 1; }
+                    to { transform: translateX(100%); opacity: 0; }
+                }
+            `;
+            document.head.appendChild(styles);
+        }
+    }
+
     loadPerformanceSettings() {
-        const content = document.querySelector('.settings-content');
-        content.innerHTML = this.createPerformanceContent();
-        this.setupPerformanceEventListeners();
+        const performanceTab = document.getElementById('performance-tab');
+        if (performanceTab) {
+            performanceTab.innerHTML = this.createPerformanceContent();
+            this.setupPerformanceEventListeners();
+        }
     }
 } 
