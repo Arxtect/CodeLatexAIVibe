@@ -7,6 +7,7 @@ import { SettingsUI } from './SettingsUI.js';
 import { VersionManager } from './VersionManager.js';
 import { VersionSidebar } from './VersionSidebar.js';
 import { ContextMenuManager } from './ContextMenuManager.js';
+import { ToolCallManager } from './ToolCallManager.js';
 
 export class IDE {
     constructor() {
@@ -19,6 +20,7 @@ export class IDE {
         this.versionManager = new VersionManager();
         this.versionSidebar = null; // 将在 initUI 中初始化
         this.contextMenuManager = new ContextMenuManager(); // 右键菜单管理器
+        this.toolCallManager = null; // 工具调用管理器，将在初始化后创建
         this.openTabs = new Map(); // 存储打开的标签页
         this.currentFile = null;
         this.isDirty = false; // 当前文件是否有未保存的更改
@@ -244,6 +246,9 @@ export class IDE {
         
         // 初始化版本侧边栏
         this.versionSidebar = new VersionSidebar(this.versionManager, this);
+        
+        // 初始化工具调用管理器
+        this.toolCallManager = new ToolCallManager(this);
         
         // 初始化项目版本管理
         await this.initProjectVersioning();
