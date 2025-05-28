@@ -8,6 +8,13 @@ import { ExamplePlugin } from './plugins/ExamplePlugin.js';
 // 全局变量
 window.ide = null;
 
+// 暴露为全局函数
+window.hideContextMenu = () => {
+    if (window.contextMenuManager) {
+        window.contextMenuManager.hide();
+    }
+};
+
 // 初始化 IDE
 async function initIDE() {
     try {
@@ -260,24 +267,24 @@ window.confirmNewFolder = async () => {
 };
 
 window.deleteFile = () => {
-    if (currentContextTarget && currentContextTarget.path) {
-        if (confirm(`确定要删除 "${currentContextTarget.path}" 吗？`)) {
+    if (window.currentContextTarget && window.currentContextTarget.path) {
+        if (confirm(`确定要删除 "${window.currentContextTarget.path}" 吗？`)) {
             // TODO: 实现文件删除功能
-            console.log('删除文件:', currentContextTarget.path);
+            console.log('删除文件:', window.currentContextTarget.path);
         }
     }
-    hideContextMenu();
+    window.hideContextMenu();
 };
 
 window.renameFile = () => {
-    if (currentContextTarget && currentContextTarget.path) {
-        const newName = prompt('请输入新名称:', currentContextTarget.path);
-        if (newName && newName !== currentContextTarget.path) {
+    if (window.currentContextTarget && window.currentContextTarget.path) {
+        const newName = prompt('请输入新名称:', window.currentContextTarget.path);
+        if (newName && newName !== window.currentContextTarget.path) {
             // TODO: 实现文件重命名功能
-            console.log('重命名文件:', currentContextTarget.path, '->', newName);
+            console.log('重命名文件:', window.currentContextTarget.path, '->', newName);
         }
     }
-    hideContextMenu();
+    window.hideContextMenu();
 };
 
 // 设置相关的全局函数

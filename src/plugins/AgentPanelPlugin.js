@@ -984,6 +984,9 @@ export class AgentPanelPlugin {
         window.addCurrentFileToContext = () => this.addCurrentFileToContext();
         window.addFileToContextByPath = (filePath) => this.addFileToContextByPath(filePath);
         
+        // 注册右键菜单项
+        this.registerContextMenuItems();
+        
         console.log('全局函数注册完成:', {
             toggleAgentPanel: !!window.toggleAgentPanel,
             agentPanel: !!window.agentPanel,
@@ -991,6 +994,83 @@ export class AgentPanelPlugin {
             addCurrentFileToContext: !!window.addCurrentFileToContext,
             addFileToContextByPath: !!window.addFileToContextByPath
         });
+    }
+
+    /**
+     * 注册右键菜单项
+     */
+    registerContextMenuItems() {
+        if (!window.contextMenuManager) {
+            console.warn('ContextMenuManager 未找到，稍后重试...');
+            // 延迟注册，等待 ContextMenuManager 初始化
+            setTimeout(() => this.registerContextMenuItems(), 500);
+            return;
+        }
+
+        const contextMenuManager = window.contextMenuManager;
+
+        // AI 上下文相关菜单项
+        contextMenuManager.registerMenuItem('add-file-to-context', {
+            label: '添加文件到AI上下文',
+            icon: '📄',
+            contexts: ['file'],
+            group: 'ai-context',
+            order: 1,
+            pluginId: this.id,
+            action: (target) => {
+                if (target && target.path) {
+                    this.addFileToContextByPath(target.path);
+                    this.showNotification(`已添加文件到上下文: ${target.path.split('/').pop()}`, 'success');
+                }
+            },
+            condition: (context, target) => context === 'file' && target && target.path
+        });
+
+        contextMenuManager.registerMenuItem('add-current-file-to-context', {
+            label: '添加当前文件到AI上下文',
+            icon: '📄',
+            contexts: ['empty', 'folder', 'tab'],
+            group: 'ai-context',
+            order: 2,
+            pluginId: this.id,
+            action: () => {
+                this.addCurrentFileToContext();
+            },
+            condition: () => window.ide && window.ide.currentFile
+        });
+
+        contextMenuManager.registerMenuItem('add-selection-to-context', {
+            label: '添加选中文本到AI上下文',
+            icon: '📝',
+            contexts: ['tab'],
+            group: 'ai-context',
+            order: 3,
+            pluginId: this.id,
+            action: () => {
+                this.addSelectionToContext();
+            },
+            condition: () => {
+                // 检查是否有选中的文本
+                if (!window.ide || !window.ide.editor) return false;
+                const selection = window.ide.editor.getSelection();
+                return selection && !selection.isEmpty();
+            }
+        });
+
+        contextMenuManager.registerMenuItem('show-agent-panel', {
+            label: '打开AI助手',
+            icon: '🤖',
+            contexts: ['file', 'folder', 'empty', 'tab'],
+            group: 'ai-panel',
+            order: 1,
+            separator: true,
+            pluginId: this.id,
+            action: () => {
+                this.show();
+            }
+        });
+
+        console.log('Agent面板右键菜单项已注册');
     }
     
     /**
@@ -1565,19 +1645,34 @@ export class AgentPanelPlugin {
      * 销毁插件
      */
     destroy() {
-        if (this.panel) {
-            this.panel.remove();
+        console.log('销毁Agent面板插件...');
+        
+        // 注销右键菜单项
+        if (window.contextMenuManager) {
+            window.contextMenuManager.unregisterPluginMenuItems(this.id);
         }
         
-        const styles = document.getElementById('agent-panel-styles');
-        if (styles) {
-            styles.remove();
+        // 移除面板
+        if (this.panel && this.panel.parentNode) {
+            this.panel.parentNode.removeChild(this.panel);
         }
         
         // 清理全局函数
         delete window.toggleAgentPanel;
         delete window.showAgentPanel;
         delete window.hideAgentPanel;
+        delete window.agentPanel;
+        delete window.addSelectionToContext;
+        delete window.addCurrentFileToContext;
+        delete window.addFileToContextByPath;
+        
+        // 清理样式
+        const styles = document.getElementById('agent-panel-styles');
+        if (styles) {
+            styles.remove();
+        }
+        
+        console.log('Agent面板插件已销毁');
     }
     
     /**

@@ -6,6 +6,7 @@ import { ShortcutManager } from './ShortcutManager.js';
 import { SettingsUI } from './SettingsUI.js';
 import { VersionManager } from './VersionManager.js';
 import { VersionSidebar } from './VersionSidebar.js';
+import { ContextMenuManager } from './ContextMenuManager.js';
 
 export class IDE {
     constructor() {
@@ -17,6 +18,7 @@ export class IDE {
         this.settingsUI = null; // 将在 initUI 中初始化
         this.versionManager = new VersionManager();
         this.versionSidebar = null; // 将在 initUI 中初始化
+        this.contextMenuManager = new ContextMenuManager(); // 右键菜单管理器
         this.openTabs = new Map(); // 存储打开的标签页
         this.currentFile = null;
         this.isDirty = false; // 当前文件是否有未保存的更改
@@ -246,8 +248,8 @@ export class IDE {
         // 初始化项目版本管理
         await this.initProjectVersioning();
         
-        // 初始化右键菜单 - 已禁用，使用 main.js 中的实现
-        // this.initContextMenu();
+        // 初始化右键菜单
+        this.initContextMenu();
         
         // 初始化文件浏览器
         this.refreshFileExplorer();
@@ -297,62 +299,43 @@ export class IDE {
 
     initContextMenu() {
         const fileExplorer = document.getElementById('fileExplorer');
-        const contextMenu = document.getElementById('contextMenu');
-        let contextTarget = null;
-
+        
+        // 注册默认的右键菜单项
+        this.contextMenuManager.registerDefaultMenuItems();
+        
+        // 暴露右键菜单管理器到全局
+        window.contextMenuManager = this.contextMenuManager;
+        
+        // 为文件浏览器添加右键菜单事件
         fileExplorer.addEventListener('contextmenu', (e) => {
             e.preventDefault();
             
             // 找到被右键点击的文件项
-            contextTarget = e.target.closest('.file-item');
+            const fileItem = e.target.closest('.file-item');
             
-            // 更新右键菜单内容
-            this.updateContextMenu(contextTarget);
-            
-            contextMenu.style.display = 'block';
-            contextMenu.style.left = e.pageX + 'px';
-            contextMenu.style.top = e.pageY + 'px';
-        });
-
-        document.addEventListener('click', () => {
-            contextMenu.style.display = 'none';
-            contextTarget = null;
+            if (fileItem) {
+                const path = fileItem.dataset.path;
+                const isFolder = fileItem.classList.contains('folder');
+                const context = isFolder ? 'folder' : 'file';
+                
+                const target = {
+                    path: path,
+                    element: fileItem,
+                    isFolder: isFolder
+                };
+                
+                this.contextMenuManager.show(e, context, target);
+            } else {
+                // 空白区域右键
+                this.contextMenuManager.show(e, 'empty');
+            }
         });
         
-        // 存储当前右键目标，供其他函数使用
+        // 存储当前右键目标，供其他函数使用（兼容性）
         this.contextTarget = null;
         fileExplorer.addEventListener('contextmenu', (e) => {
             this.contextTarget = e.target.closest('.file-item');
         });
-    }
-
-    updateContextMenu(target) {
-        const contextMenu = document.getElementById('contextMenu');
-        
-        if (!target) {
-            // 空白区域右键
-            contextMenu.innerHTML = `
-                <div class="context-menu-item" onclick="window.createNewFile()">新建文件</div>
-                <div class="context-menu-item" onclick="window.createNewFolder()">新建文件夹</div>
-            `;
-        } else if (target.classList.contains('folder')) {
-            // 文件夹右键
-            contextMenu.innerHTML = `
-                <div class="context-menu-item" onclick="window.ide.createFileInFolder()">在此文件夹中新建文件</div>
-                <div class="context-menu-item" onclick="window.ide.createFolderInFolder()">在此文件夹中新建文件夹</div>
-                <div class="context-menu-separator"></div>
-                <div class="context-menu-item" onclick="window.ide.renameItem()">重命名</div>
-                <div class="context-menu-item" onclick="window.ide.deleteItem()">删除</div>
-            `;
-        } else {
-            // 文件右键
-            contextMenu.innerHTML = `
-                <div class="context-menu-item" onclick="window.ide.openFile(window.ide.getContextTargetPath())">打开</div>
-                <div class="context-menu-separator"></div>
-                <div class="context-menu-item" onclick="window.ide.renameItem()">重命名</div>
-                <div class="context-menu-item" onclick="window.ide.deleteItem()">删除</div>
-            `;
-        }
     }
 
     getContextTargetPath() {
@@ -507,7 +490,7 @@ export class IDE {
         fileExplorer.innerHTML = '<div class="loading">加载中...</div>';
         
         try {
-            await this.renderFileTree('/', fileExplorer, 0);
+            await this.renderFileTree('/', fileExplorer, 0, 15);
         } catch (error) {
             console.error('刷新文件浏览器失败:', error);
             fileExplorer.innerHTML = '<div class="error">加载文件失败</div>';
@@ -835,8 +818,24 @@ export class IDE {
             <div class="tab-close" onclick="event.stopPropagation(); window.ide.closeTab('${filePath}')">×</div>
         `;
         
+        // 左键点击切换标签
         tab.addEventListener('click', () => {
             this.switchToTab(filePath);
+        });
+
+        // 右键菜单支持
+        tab.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            const target = {
+                path: filePath,
+                element: tab,
+                isTab: true
+            };
+            
+            // 使用右键菜单管理器显示标签页菜单
+            this.contextMenuManager.show(e, 'tab', target);
         });
 
         tabBar.appendChild(tab);
@@ -904,6 +903,29 @@ export class IDE {
     closeCurrentTab() {
         if (this.currentFile) {
             this.closeTab(this.currentFile);
+        }
+    }
+
+    closeOtherTabs(keepFilePath) {
+        const allTabs = document.querySelectorAll('.tab');
+        const tabsToClose = [];
+        
+        // 收集需要关闭的标签
+        allTabs.forEach(tab => {
+            const filePath = tab.dataset.filePath;
+            if (filePath !== keepFilePath) {
+                tabsToClose.push(filePath);
+            }
+        });
+        
+        // 关闭收集到的标签
+        tabsToClose.forEach(filePath => {
+            this.closeTab(filePath);
+        });
+        
+        // 确保保留的标签是当前活动标签
+        if (keepFilePath && this.currentFile !== keepFilePath) {
+            this.switchToTab(keepFilePath);
         }
     }
 
@@ -1189,34 +1211,5 @@ export class IDE {
         //     return success;
         // }
         // return false;
-    }
-
-    // 重写 closeTab 方法以清理版本管理
-    closeTab(filePath) {
-        // 由于内容是实时同步的，无需确认保存
-        // 直接解绑版本管理
-        this.versionManager.unbindFile(filePath);
-
-        // 移除标签
-        const tab = document.querySelector(`[data-file-path="${filePath}"]`);
-        if (tab) {
-            tab.remove();
-        }
-
-        // 移除文件数据
-        this.openTabs.delete(filePath);
-
-        // 如果关闭的是当前文件，切换到其他标签
-        if (this.currentFile === filePath) {
-            const remainingTabs = document.querySelectorAll('.tab');
-            if (remainingTabs.length > 0) {
-                const nextFilePath = remainingTabs[0].dataset.filePath;
-                this.switchToTab(nextFilePath);
-            } else {
-                this.currentFile = null;
-                this.editor.setValue('');
-                this.updateStatusBar();
-            }
-        }
     }
 } 
