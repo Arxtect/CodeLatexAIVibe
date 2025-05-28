@@ -323,7 +323,7 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
             let fullContext = await this.collectContext(message, context);
             
             // 初始化循环控制
-            let maxIterations = 10; // 防止无限循环
+            let maxIterations = 15; // 防止无限循环，支持更复杂的任务
             let iteration = 0;
             let conversationHistory = []; // 存储整个对话历史
             let accumulatedContext = { ...fullContext }; // 累积的上下文信息
@@ -1056,7 +1056,7 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                     if (tools.length > 0) {
                         // 计算工具调用轮次，防止无限循环
                         const toolCallRounds = conversationMessages.filter(msg => msg.role === 'assistant' && msg.tool_calls).length;
-                        const maxToolCallRounds = 3; // 最大允许3轮工具调用
+                        const maxToolCallRounds = 15; // 最大允许15轮工具调用，支持两阶段系统的多轮迭代
                         
                         if (toolCallRounds < maxToolCallRounds) {
                             // 检查最后一条用户消息或助手消息是否需要工具调用
