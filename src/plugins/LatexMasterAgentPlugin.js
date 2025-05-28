@@ -397,40 +397,65 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
         let systemPrompt = `你是 LaTeX Master，一个智能的 LaTeX 文档助手。你的任务是分析用户需求，制定详细的执行计划，并生成相应的操作指令。
 
 你可以执行以下类型的操作：
-1. create - 创建新文件
-2. edit - 编辑现有文件
-3. delete - 删除文件
-4. move - 移动/重命名文件
-5. search - 搜索文件内容
-6. compile - 编译 LaTeX 文档
-7. terminal - 执行终端命令
-8. ui - 用户界面操作
+1. **create** - 创建新文件
+2. **edit** - 编辑现有文件（支持精确的行范围编辑）
+3. **delete** - 删除文件
+4. **move** - 移动/重命名文件
+5. **search** - 搜索文件内容
+6. **compile** - 编译 LaTeX 文档
+7. **terminal** - 执行终端命令
+8. **ui** - 用户界面操作
+
+**重要：你必须生成可直接执行的具体操作步骤。**
+
+对于文件编辑操作，你需要：
+1. 先读取文件内容（如果用户提供了上下文）
+2. 分析需要修改的具体位置
+3. 生成精确的编辑指令，包括：
+   - 起始行号和结束行号
+   - 要替换的内容
+   - 新的内容
 
 请根据用户需求，生成一个详细的执行计划，格式如下：
 
 \`\`\`json
 {
-  "analysis": "对用户需求的分析",
-  "goal": "要达成的目标",
+  "analysis": "对用户需求的详细分析",
+  "goal": "要达成的具体目标",
   "steps": [
     {
       "id": 1,
-      "type": "create|edit|delete|move|search|compile|terminal|ui",
-      "description": "步骤描述",
-      "target": "目标文件路径或操作对象",
-      "content": "文件内容或操作参数",
-      "reasoning": "执行此步骤的原因"
+      "type": "edit",
+      "description": "删除重复内容",
+      "target": "/images/README.md",
+      "content": "# 图片文件夹\\n\\n请将图片文件放在这个文件夹中。\\n\\n支持的格式：\\n- PNG\\n- JPG\\n- JPEG\\n- GIF\\n- SVG\\n\\n## 使用说明\\n\\n1. 将图片文件拖拽到此文件夹\\n2. 在LaTeX文档中引用图片\\n3. 使用相对路径引用",
+      "editType": "replace",
+      "startLine": 1,
+      "endLine": -1,
+      "reasoning": "将整个文件内容替换为去重后的版本"
     }
   ],
-  "expectedOutcome": "预期结果"
+  "expectedOutcome": "预期的具体结果"
 }
 \`\`\`
+
+**编辑操作的详细说明：**
+- **editType**: "replace" (替换), "insert" (插入), "delete" (删除)
+- **startLine**: 起始行号（1开始），-1表示文件末尾
+- **endLine**: 结束行号（包含），-1表示文件末尾
+- **content**: 新的内容（对于replace和insert）
+
+**示例编辑操作：**
+1. 替换整个文件：startLine: 1, endLine: -1, editType: "replace"
+2. 删除第5-10行：startLine: 5, endLine: 10, editType: "delete"
+3. 在第3行后插入：startLine: 3, endLine: 3, editType: "insert"
 
 注意：
 - 分析要准确理解用户意图
 - 步骤要详细且可执行
 - 考虑 LaTeX 文档的最佳实践
-- 确保操作的安全性和合理性`;
+- 确保操作的安全性和合理性
+- 对于文件编辑，必须提供具体的行号和内容`;
 
         // 添加自定义上下文
         if (this.config.customContext && this.config.customContext.trim()) {
@@ -816,13 +841,22 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                     return this.createCreateAction(step.target, step.content || '');
                     
                 case 'edit':
-                    return this.createEditAction(step.target, [{
-                        range: { startLine: 0, endLine: 0 },
-                        text: step.content || ''
-                    }]);
+                    return await this.createAdvancedEditAction(step, context);
                     
                 case 'delete':
                     return this.createDeleteAction(step.target);
+                    
+                case 'move':
+                    return this.createMoveAction(step.target, step.destination);
+                    
+                case 'search':
+                    return this.createSearchAction(step.target, step.query);
+                    
+                case 'compile':
+                    return this.createCompileAction(step.target);
+                    
+                case 'terminal':
+                    return this.createTerminalAction(step.command);
                     
                 case 'ui':
                     return this.createUIAction(step.action || 'showMessage', {
@@ -837,6 +871,118 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
             this.log('error', '创建动作失败', error);
             return null;
         }
+    }
+    
+    /**
+     * 创建高级编辑动作
+     */
+    async createAdvancedEditAction(step, context) {
+        try {
+            const filePath = step.target;
+            const editType = step.editType || 'replace';
+            const startLine = step.startLine || 1;
+            const endLine = step.endLine || -1;
+            const content = step.content || '';
+            
+            // 读取当前文件内容（如果需要）
+            let currentContent = '';
+            try {
+                if (window.ide && window.ide.fileSystem) {
+                    currentContent = await window.ide.fileSystem.readFile(filePath, 'utf8');
+                }
+            } catch (error) {
+                // 文件可能不存在，这是正常的
+                this.log('info', `文件 ${filePath} 不存在或无法读取，将创建新文件`);
+            }
+            
+            const lines = currentContent.split('\n');
+            let newContent = '';
+            
+            switch (editType) {
+                case 'replace':
+                    if (startLine === 1 && endLine === -1) {
+                        // 替换整个文件
+                        newContent = content;
+                    } else {
+                        // 替换指定行范围
+                        const actualEndLine = endLine === -1 ? lines.length : endLine;
+                        const beforeLines = lines.slice(0, startLine - 1);
+                        const afterLines = lines.slice(actualEndLine);
+                        newContent = [...beforeLines, content, ...afterLines].join('\n');
+                    }
+                    break;
+                    
+                case 'insert':
+                    // 在指定行后插入
+                    const insertLines = lines.slice(0, startLine);
+                    const remainingLines = lines.slice(startLine);
+                    newContent = [...insertLines, content, ...remainingLines].join('\n');
+                    break;
+                    
+                case 'delete':
+                    // 删除指定行范围
+                    const actualEndLineForDelete = endLine === -1 ? lines.length : endLine;
+                    const beforeDeleteLines = lines.slice(0, startLine - 1);
+                    const afterDeleteLines = lines.slice(actualEndLineForDelete);
+                    newContent = [...beforeDeleteLines, ...afterDeleteLines].join('\n');
+                    break;
+                    
+                default:
+                    throw new Error(`未知的编辑类型: ${editType}`);
+            }
+            
+            // 创建编辑动作，使用完整的文件替换
+            return this.createAction('edit', {
+                filePath: filePath,
+                newContent: newContent,
+                editType: editType,
+                startLine: startLine,
+                endLine: endLine,
+                originalContent: currentContent
+            });
+            
+        } catch (error) {
+            this.log('error', '创建高级编辑动作失败', error);
+            throw error;
+        }
+    }
+    
+    /**
+     * 创建移动文件动作
+     */
+    createMoveAction(sourcePath, destinationPath) {
+        return this.createAction('move', {
+            sourcePath: sourcePath,
+            destinationPath: destinationPath
+        });
+    }
+    
+    /**
+     * 创建搜索动作
+     */
+    createSearchAction(filePath, query) {
+        return this.createAction('search', {
+            filePath: filePath,
+            query: query
+        });
+    }
+    
+    /**
+     * 创建编译动作
+     */
+    createCompileAction(filePath) {
+        return this.createAction('compile', {
+            filePath: filePath
+        });
+    }
+    
+    /**
+     * 创建终端命令动作
+     */
+    createTerminalAction(command) {
+        return this.createAction('terminal', {
+            command: command
+        });
     }
     
     /**

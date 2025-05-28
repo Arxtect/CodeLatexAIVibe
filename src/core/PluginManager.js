@@ -749,7 +749,33 @@ export class PluginManager {
     // 执行编辑文件动作
     async executeEditAction(data) {
         try {
-            if (!window.ide || !window.ide.editor) {
+            if (!window.ide || !window.ide.fileSystem) {
+                throw new Error('文件系统未初始化');
+            }
+            
+            // 新的编辑格式：直接替换文件内容
+            if (data.newContent !== undefined) {
+                await window.ide.fileSystem.writeFile(data.filePath, data.newContent);
+                
+                // 如果文件在编辑器中打开，更新编辑器内容
+                if (window.ide.currentFile === data.filePath && window.ide.editor) {
+                    const model = window.ide.editor.getModel();
+                    if (model) {
+                        model.setValue(data.newContent);
+                    }
+                }
+                
+                // 刷新文件浏览器
+                if (window.ide.refreshFileExplorer) {
+                    window.ide.refreshFileExplorer();
+                }
+                
+                console.log(`文件已编辑: ${data.filePath}`);
+                return true;
+            }
+            
+            // 旧的编辑格式：使用Monaco编辑器的编辑操作
+            if (!window.ide.editor) {
                 throw new Error('编辑器未初始化');
             }
             
