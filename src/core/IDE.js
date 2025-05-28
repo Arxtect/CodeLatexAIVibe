@@ -1223,25 +1223,59 @@ export class IDE {
     }
 
     redo() {
-        // Undo/Redo functionality disabled - using Monaco's built-in undo/redo
+        // Redo functionality disabled
         console.log('Redo functionality disabled');
         return false;
-        
-        // if (this.versionManager) {
-        //     const success = this.versionManager.redo();
-        //     if (success) {
-        //         document.getElementById('statusText').textContent = '已重做操作';
-        //         setTimeout(() => {
-        //             this.updateStatusBar();
-        //         }, 1000);
-        //     } else {
-        //         document.getElementById('statusText').textContent = '无可重做的操作';
-        //         setTimeout(() => {
-        //             this.updateStatusBar();
-        //         }, 1000);
-        //     }
-        //     return success;
+        // if (this.versionManager.canRedo()) {
+        //     this.versionManager.redo();
+        //     this.updateUndoRedoButtons();
+        //     return true;
         // }
         // return false;
+    }
+
+    // 存储管理功能
+    getStorageInfo() {
+        return this.versionManager.getStorageInfo();
+    }
+    
+    getStorageStats() {
+        return this.versionManager.getStorageStats();
+    }
+    
+    checkStorageHealth() {
+        return this.versionManager.checkStorageHealth();
+    }
+    
+    cleanupStorage(options = {}) {
+        return this.versionManager.manualCleanup(options);
+    }
+    
+    setMaxSnapshots(count) {
+        this.versionManager.setMaxSnapshots(count);
+    }
+    
+    getMaxSnapshots() {
+        return this.versionManager.getMaxSnapshots();
+    }
+    
+    // 显示存储状态
+    showStorageStatus() {
+        const health = this.checkStorageHealth();
+        console.log('=== 存储状态 ===');
+        console.log(`使用量: ${health.used}MB / ${health.quota}MB (${health.usagePercentage}%)`);
+        console.log(`状态: ${health.health.status}`);
+        console.log(`快照数量: ${health.snapshotCount}`);
+        console.log(`总项目数: ${health.itemCount}`);
+        
+        if (health.health.warnings.length > 0) {
+            console.warn('警告:', health.health.warnings);
+        }
+        
+        if (health.health.recommendations.length > 0) {
+            console.log('建议:', health.health.recommendations);
+        }
+        
+        return health;
     }
 } 

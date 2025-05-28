@@ -127,6 +127,9 @@ async function initIDE() {
         // 初始化 Agent 系统
         await initAgents();
         
+        // 启动存储监控
+        window.startStorageMonitoring();
+        
         console.log('LaTeX IDE 初始化完成');
     } catch (error) {
         console.error('IDE 初始化失败:', error);
@@ -407,6 +410,141 @@ async function initAgents() {
         console.error('Agent 插件系统初始化失败:', error);
     }
 }
+
+// 存储管理全局函数
+window.getStorageInfo = () => {
+    if (window.ide) {
+        return window.ide.getStorageInfo();
+    }
+    return null;
+};
+
+window.getStorageStats = () => {
+    if (window.ide) {
+        return window.ide.getStorageStats();
+    }
+    return null;
+};
+
+window.checkStorageHealth = () => {
+    if (window.ide) {
+        return window.ide.checkStorageHealth();
+    }
+    return null;
+};
+
+window.showStorageStatus = () => {
+    if (window.ide) {
+        return window.ide.showStorageStatus();
+    }
+    return null;
+};
+
+window.cleanupStorage = (options = {}) => {
+    if (window.ide) {
+        return window.ide.cleanupStorage(options);
+    }
+    return null;
+};
+
+window.setMaxSnapshots = (count) => {
+    if (window.ide) {
+        window.ide.setMaxSnapshots(count);
+        console.log(`最大快照数量已设置为: ${count}`);
+    }
+};
+
+window.getMaxSnapshots = () => {
+    if (window.ide) {
+        return window.ide.getMaxSnapshots();
+    }
+    return null;
+};
+
+// 快速清理函数
+window.quickCleanup = () => {
+    if (window.ide) {
+        console.log('开始快速清理存储...');
+        const result = window.ide.cleanupStorage({
+            keepSnapshots: 10,
+            cleanOtherProjects: true,
+            cleanTemporary: true,
+            aggressive: false
+        });
+        console.log('快速清理完成:', result);
+        return result;
+    }
+    return null;
+};
+
+// 激进清理函数（谨慎使用）
+window.aggressiveCleanup = () => {
+    if (window.ide) {
+        const confirm = window.confirm('激进清理将删除大量数据，确定要继续吗？');
+        if (confirm) {
+            console.log('开始激进清理存储...');
+            const result = window.ide.cleanupStorage({
+                keepSnapshots: 5,
+                cleanOtherProjects: true,
+                cleanTemporary: true,
+                aggressive: true
+            });
+            console.log('激进清理完成:', result);
+            return result;
+        }
+    }
+    return null;
+};
+
+// 更新存储状态指示器
+window.updateStorageStatus = () => {
+    if (!window.ide) return;
+    
+    try {
+        const health = window.ide.checkStorageHealth();
+        const statusElement = document.getElementById('storageStatus');
+        
+        if (!statusElement) return;
+        
+        const usageText = `💾 存储: ${health.used.toFixed(1)}MB/${health.quota}MB (${health.usagePercentage}%)`;
+        statusElement.textContent = usageText;
+        
+        // 移除所有状态类
+        statusElement.classList.remove('warning', 'critical');
+        
+        // 根据使用率添加相应的状态类
+        if (health.health.status === 'critical') {
+            statusElement.classList.add('critical');
+            statusElement.title = '存储空间严重不足！点击查看详情并清理';
+        } else if (health.health.status === 'warning') {
+            statusElement.classList.add('warning');
+            statusElement.title = '存储空间使用率较高，建议清理。点击查看详情';
+        } else {
+            statusElement.title = '存储状态良好。点击查看详细信息';
+        }
+        
+    } catch (error) {
+        console.warn('更新存储状态失败:', error);
+        const statusElement = document.getElementById('storageStatus');
+        if (statusElement) {
+            statusElement.textContent = '💾 存储: 错误';
+            statusElement.title = '无法获取存储状态';
+        }
+    }
+};
+
+// 设置定期更新存储状态
+window.startStorageMonitoring = () => {
+    // 立即更新一次
+    window.updateStorageStatus();
+    
+    // 每30秒更新一次
+    setInterval(() => {
+        window.updateStorageStatus();
+    }, 30000);
+    
+    console.log('存储监控已启动');
+};
 
 // 页面加载完成后初始化
 document.addEventListener('DOMContentLoaded', () => {

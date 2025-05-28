@@ -277,6 +277,35 @@
             gap: 16px;
         }
         
+        .storage-status {
+            cursor: pointer;
+            padding: 2px 6px;
+            border-radius: 3px;
+            transition: background-color 0.2s;
+            font-size: 11px;
+        }
+        
+        .storage-status:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+        
+        .storage-status.warning {
+            background: #ff8c00;
+            color: white;
+        }
+        
+        .storage-status.critical {
+            background: #e81123;
+            color: white;
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.7; }
+            100% { opacity: 1; }
+        }
+        
         .context-menu {
             position: fixed;
             background: #252526;
@@ -1328,6 +1357,9 @@
                 <span id="cursorPosition">行 1, 列 1</span>
                 <span id="fileEncoding">UTF-8</span>
                 <span id="fileType">LaTeX</span>
+                <span id="storageStatus" class="storage-status" onclick="showStorageStatus()" title="点击查看详细存储信息">
+                    💾 存储: --
+                </span>
                 <span style="margin-left: auto; font-size: 11px; opacity: 0.8;">💾 内容实时同步</span>
             </div>
         </div>

@@ -6,19 +6,23 @@ export class VersionManager {
     constructor() {
         this.projectDoc = null; // 项目级 Y.Doc
         this.projectProvider = null; // 项目持久化提供者
-        this.fileBindings = new Map(); // 文件绑定映射
+        this.fileBindings = new Map(); // 文件路径 -> YText 绑定
         this.projectPath = null; // 当前项目路径
-        this.autoSaveEnabled = true; // 默认开启自动保存
+        this.autoSaveEnabled = false; // 默认开启自动保存
         this.autoSaveInterval = 30000; // 30秒自动保存
         this.autoSaveTimer = null;
-        this.undoManager = null; // Undo/Redo 管理器
-        this.listeners = new Map();
+        this.undoManager = null; // Yjs UndoManager - 已禁用
+        this.eventListeners = new Map();
+        
+        // 存储管理配置
+        this.maxSnapshots = 50; // 默认最大快照数量
+        this.storageWarningThreshold = 0.8; // 存储使用率警告阈值
         
         this.setupEventListeners();
     }
 
     setupEventListeners() {
-        this.listeners = new Map();
+        this.eventListeners = new Map();
     }
 
     // 初始化项目版本管理
@@ -42,10 +46,6 @@ export class VersionManager {
                 resolve();
             });
         });
-        
-        // Undo/Redo 管理器已禁用
-        // console.log('🔧 开始设置 UndoManager...');
-        // this.setupUndoManager();
         
         // UndoManager 已禁用
         // if (this.undoManager) {
@@ -350,16 +350,234 @@ export class VersionManager {
             const snapshots = this.getProjectSnapshots();
             snapshots.push(snapshot);
             
-            // 限制快照数量（保留最近100个）
-            if (snapshots.length > 100) {
-                snapshots.splice(0, snapshots.length - 100);
+            // 限制快照数量（使用配置的最大值）
+            if (snapshots.length > this.maxSnapshots) {
+                snapshots.splice(0, snapshots.length - this.maxSnapshots);
             }
             
             const key = `project_snapshots_${this.projectPath}`;
-            localStorage.setItem(key, JSON.stringify(snapshots));
+            const dataToSave = JSON.stringify(snapshots);
+            
+            // 尝试保存，如果超出配额则进行清理
+            this.saveWithQuotaManagement(key, dataToSave, snapshots);
+            
         } catch (error) {
             console.error('保存项目快照失败:', error);
+            
+            // 如果是配额错误，尝试清理存储
+            if (error.name === 'QuotaExceededError') {
+                this.handleStorageQuotaExceeded();
+            }
         }
+    }
+    
+    // 带配额管理的保存方法
+    saveWithQuotaManagement(key, dataToSave, snapshots) {
+        try {
+            localStorage.setItem(key, dataToSave);
+        } catch (error) {
+            if (error.name === 'QuotaExceededError') {
+                console.warn('存储配额已满，开始清理旧快照...');
+                
+                // 逐步减少快照数量直到能够保存
+                let maxRetries = 5;
+                let currentSnapshots = [...snapshots];
+                
+                while (maxRetries > 0 && currentSnapshots.length > 10) {
+                    // 每次减少20%的快照
+                    const removeCount = Math.max(1, Math.floor(currentSnapshots.length * 0.2));
+                    currentSnapshots.splice(0, removeCount);
+                    
+                    try {
+                        const reducedData = JSON.stringify(currentSnapshots);
+                        localStorage.setItem(key, reducedData);
+                        console.log(`已清理 ${removeCount} 个旧快照，当前保留 ${currentSnapshots.length} 个快照`);
+                        return;
+                    } catch (retryError) {
+                        if (retryError.name !== 'QuotaExceededError') {
+                            throw retryError;
+                        }
+                        maxRetries--;
+                    }
+                }
+                
+                // 如果还是无法保存，进行更激进的清理
+                if (maxRetries === 0) {
+                    this.performAggressiveCleanup();
+                    
+                    // 最后尝试只保存最新的10个快照
+                    const minimalSnapshots = snapshots.slice(-10);
+                    const minimalData = JSON.stringify(minimalSnapshots);
+                    localStorage.setItem(key, minimalData);
+                    console.log('已执行激进清理，仅保留最新10个快照');
+                }
+            } else {
+                throw error;
+            }
+        }
+    }
+    
+    // 处理存储配额超出
+    handleStorageQuotaExceeded() {
+        console.warn('检测到存储配额超出，开始清理...');
+        
+        // 获取当前存储使用情况
+        const storageInfo = this.getStorageInfo();
+        console.log('当前存储使用情况:', storageInfo);
+        
+        // 清理策略：
+        // 1. 清理其他项目的旧快照
+        this.cleanupOtherProjectSnapshots();
+        
+        // 2. 清理当前项目的旧快照
+        this.cleanupCurrentProjectSnapshots();
+        
+        // 3. 清理临时数据
+        this.cleanupTemporaryData();
+        
+        console.log('存储清理完成');
+    }
+    
+    // 获取存储使用信息
+    getStorageInfo() {
+        let totalSize = 0;
+        let itemCount = 0;
+        const items = {};
+        
+        for (let key in localStorage) {
+            if (localStorage.hasOwnProperty(key)) {
+                const value = localStorage.getItem(key);
+                const size = new Blob([value]).size;
+                totalSize += size;
+                itemCount++;
+                
+                if (key.startsWith('project_snapshots_')) {
+                    items[key] = {
+                        size: size,
+                        sizeKB: Math.round(size / 1024),
+                        sizeMB: Math.round(size / 1024 / 1024 * 100) / 100
+                    };
+                }
+            }
+        }
+        
+        return {
+            totalSize,
+            totalSizeKB: Math.round(totalSize / 1024),
+            totalSizeMB: Math.round(totalSize / 1024 / 1024 * 100) / 100,
+            itemCount,
+            snapshotItems: items
+        };
+    }
+    
+    // 清理其他项目的快照
+    cleanupOtherProjectSnapshots() {
+        const currentProjectKey = `project_snapshots_${this.projectPath}`;
+        const keysToClean = [];
+        
+        for (let key in localStorage) {
+            if (key.startsWith('project_snapshots_') && key !== currentProjectKey) {
+                keysToClean.push(key);
+            }
+        }
+        
+        // 删除其他项目的快照（保留最新5个）
+        keysToClean.forEach(key => {
+            try {
+                const snapshots = JSON.parse(localStorage.getItem(key) || '[]');
+                if (snapshots.length > 5) {
+                    const reducedSnapshots = snapshots.slice(-5);
+                    localStorage.setItem(key, JSON.stringify(reducedSnapshots));
+                    console.log(`已清理项目快照: ${key}，保留最新5个`);
+                }
+            } catch (error) {
+                console.warn(`清理项目快照失败: ${key}`, error);
+                localStorage.removeItem(key);
+            }
+        });
+    }
+    
+    // 清理当前项目的快照
+    cleanupCurrentProjectSnapshots() {
+        const key = `project_snapshots_${this.projectPath}`;
+        try {
+            const snapshots = this.getProjectSnapshots();
+            if (snapshots.length > 20) {
+                // 保留最新20个快照
+                const reducedSnapshots = snapshots.slice(-20);
+                localStorage.setItem(key, JSON.stringify(reducedSnapshots));
+                console.log(`已清理当前项目快照，保留最新20个`);
+            }
+        } catch (error) {
+            console.warn('清理当前项目快照失败:', error);
+        }
+    }
+    
+    // 清理临时数据
+    cleanupTemporaryData() {
+        const keysToRemove = [];
+        
+        for (let key in localStorage) {
+            // 清理可能的临时数据
+            if (key.startsWith('temp_') || 
+                key.startsWith('cache_') || 
+                key.startsWith('debug_') ||
+                key.includes('_temp') ||
+                key.includes('_cache')) {
+                keysToRemove.push(key);
+            }
+        }
+        
+        keysToRemove.forEach(key => {
+            localStorage.removeItem(key);
+            console.log(`已清理临时数据: ${key}`);
+        });
+    }
+    
+    // 执行激进清理
+    performAggressiveCleanup() {
+        console.warn('执行激进存储清理...');
+        
+        // 清理所有非当前项目的快照
+        const currentProjectKey = `project_snapshots_${this.projectPath}`;
+        const keysToRemove = [];
+        
+        for (let key in localStorage) {
+            if (key.startsWith('project_snapshots_') && key !== currentProjectKey) {
+                keysToRemove.push(key);
+            }
+        }
+        
+        keysToRemove.forEach(key => {
+            localStorage.removeItem(key);
+            console.log(`已删除其他项目快照: ${key}`);
+        });
+        
+        // 清理所有临时数据
+        this.cleanupTemporaryData();
+        
+        console.log('激进清理完成');
+    }
+    
+    // 获取存储使用统计
+    getStorageStats() {
+        const info = this.getStorageInfo();
+        const quota = this.estimateStorageQuota();
+        
+        return {
+            used: info.totalSizeMB,
+            quota: quota,
+            usagePercentage: quota > 0 ? Math.round((info.totalSizeMB / quota) * 100) : 0,
+            itemCount: info.itemCount,
+            snapshotCount: Object.keys(info.snapshotItems).length
+        };
+    }
+    
+    // 估算存储配额
+    estimateStorageQuota() {
+        // 大多数浏览器的 localStorage 限制在 5-10MB
+        // 这里返回一个保守估计
+        return 5; // MB
     }
 
     // 删除项目快照
@@ -600,15 +818,15 @@ export class VersionManager {
 
     // 事件监听
     on(event, callback) {
-        if (!this.listeners.has(event)) {
-            this.listeners.set(event, []);
+        if (!this.eventListeners.has(event)) {
+            this.eventListeners.set(event, []);
         }
-        this.listeners.get(event).push(callback);
+        this.eventListeners.get(event).push(callback);
     }
 
     off(event, callback) {
-        if (this.listeners.has(event)) {
-            const callbacks = this.listeners.get(event);
+        if (this.eventListeners.has(event)) {
+            const callbacks = this.eventListeners.get(event);
             const index = callbacks.indexOf(callback);
             if (index > -1) {
                 callbacks.splice(index, 1);
@@ -617,8 +835,8 @@ export class VersionManager {
     }
 
     notifyListeners(event, data) {
-        if (this.listeners.has(event)) {
-            this.listeners.get(event).forEach(callback => {
+        if (this.eventListeners.has(event)) {
+            this.eventListeners.get(event).forEach(callback => {
                 try {
                     callback(data);
                 } catch (error) {
@@ -653,8 +871,106 @@ export class VersionManager {
         }
         
         this.fileBindings.clear();
-        this.listeners.clear();
+        this.eventListeners.clear();
         
         console.log('项目版本管理器已销毁');
+    }
+
+    // 手动清理存储（用于调试和维护）
+    manualCleanup(options = {}) {
+        const {
+            keepSnapshots = 10,
+            cleanOtherProjects = true,
+            cleanTemporary = true,
+            aggressive = false
+        } = options;
+        
+        console.log('开始手动存储清理...', options);
+        
+        const beforeInfo = this.getStorageInfo();
+        console.log('清理前存储使用:', beforeInfo);
+        
+        try {
+            if (cleanTemporary) {
+                this.cleanupTemporaryData();
+            }
+            
+            if (cleanOtherProjects) {
+                this.cleanupOtherProjectSnapshots();
+            }
+            
+            // 清理当前项目快照
+            const key = `project_snapshots_${this.projectPath}`;
+            const snapshots = this.getProjectSnapshots();
+            if (snapshots.length > keepSnapshots) {
+                const reducedSnapshots = snapshots.slice(-keepSnapshots);
+                localStorage.setItem(key, JSON.stringify(reducedSnapshots));
+                console.log(`已清理当前项目快照，保留最新${keepSnapshots}个`);
+            }
+            
+            if (aggressive) {
+                this.performAggressiveCleanup();
+            }
+            
+            const afterInfo = this.getStorageInfo();
+            console.log('清理后存储使用:', afterInfo);
+            
+            const savedKB = beforeInfo.totalSizeKB - afterInfo.totalSizeKB;
+            console.log(`清理完成，释放了 ${savedKB}KB 存储空间`);
+            
+            return {
+                success: true,
+                beforeSize: beforeInfo.totalSizeKB,
+                afterSize: afterInfo.totalSizeKB,
+                savedKB: savedKB
+            };
+            
+        } catch (error) {
+            console.error('手动清理失败:', error);
+            return {
+                success: false,
+                error: error.message
+            };
+        }
+    }
+    
+    // 检查存储健康状况
+    checkStorageHealth() {
+        const stats = this.getStorageStats();
+        const health = {
+            status: 'good',
+            warnings: [],
+            recommendations: []
+        };
+        
+        if (stats.usagePercentage > 90) {
+            health.status = 'critical';
+            health.warnings.push('存储使用率超过90%，可能导致保存失败');
+            health.recommendations.push('立即清理旧快照');
+        } else if (stats.usagePercentage > 70) {
+            health.status = 'warning';
+            health.warnings.push('存储使用率较高');
+            health.recommendations.push('考虑清理一些旧快照');
+        }
+        
+        if (stats.snapshotCount > 10) {
+            health.recommendations.push('考虑减少快照保留数量');
+        }
+        
+        return {
+            ...stats,
+            health
+        };
+    }
+    
+    // 设置最大快照数量
+    setMaxSnapshots(count) {
+        this.maxSnapshots = Math.max(5, Math.min(100, count));
+        console.log(`最大快照数量已设置为: ${this.maxSnapshots}`);
+    }
+    
+    // 获取最大快照数量
+    getMaxSnapshots() {
+        return this.maxSnapshots;
     }
 } 
