@@ -319,5 +319,57 @@ window.createSnapshot = () => {
 //     return false;
 // };
 
+// Agent 相关的全局函数
+window.toggleAgentPanel = () => {
+    if (window.ide) {
+        window.ide.toggleAgentPanel();
+    }
+};
+
+window.showAgentPanel = () => {
+    if (window.ide) {
+        window.ide.showAgentPanel();
+    }
+};
+
+window.hideAgentPanel = () => {
+    if (window.ide) {
+        window.ide.hideAgentPanel();
+    }
+};
+
+// 初始化 Agent 系统
+async function initAgents() {
+    try {
+        // 动态导入 Agent 插件
+        const { ExampleAgent } = await import('./agents/ExampleAgent.js');
+        const { ClineCompatAgent } = await import('./agents/ClineCompatAgent.js');
+        const { LaTeXAssistantAgent } = await import('./agents/LaTeXAssistantAgent.js');
+        
+        // 注册示例 Agent
+        const exampleAgent = new ExampleAgent();
+        window.ide.agentAPI.registerAgent(exampleAgent);
+        
+        // 注册 Cline 兼容 Agent
+        const clineAgent = new ClineCompatAgent();
+        window.ide.agentAPI.registerAgent(clineAgent);
+        
+        // 注册 LaTeX 智能助手 Agent
+        const latexAssistant = new LaTeXAssistantAgent();
+        window.ide.agentAPI.registerAgent(latexAssistant);
+        
+        console.log('Agent 系统初始化完成');
+    } catch (error) {
+        console.error('Agent 系统初始化失败:', error);
+    }
+}
+
 // 页面加载完成后初始化
-document.addEventListener('DOMContentLoaded', initIDE); 
+document.addEventListener('DOMContentLoaded', async () => {
+    await initIDE();
+    
+    // 初始化 Agent 系统
+    setTimeout(async () => {
+        await initAgents();
+    }, 1000);
+}); 

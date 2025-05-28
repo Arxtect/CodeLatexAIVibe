@@ -14,7 +14,8 @@ export class SettingsManager {
                 'toggleSidebar': 'Ctrl+B',
                 'commandPalette': 'Ctrl+Shift+P',
                 'toggleVersionSidebar': 'Ctrl+Shift+V',
-                'createSnapshot': 'Ctrl+Shift+S'
+                'createSnapshot': 'Ctrl+Shift+S',
+                'toggleAgentPanel': 'Ctrl+Shift+A'
                 // undo/redo 由编辑器直接处理，避免冲突
             },
             plugins: {

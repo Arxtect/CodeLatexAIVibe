@@ -88,4 +88,20 @@ jspm_packages/
 .dynamodb/
 
 # TernJS port file
-.tern-port 
+.tern-port
+
+# AI generated test files and documentation
+test-*.html
+test-*.js
+debug-*.html
+debug-*.js
+*-demo.html
+*-demo.js
+AI_*.md
+DEMO_*.md
+AGENT_DEMO*.md
+AGENT_SYSTEM*.md
+AGENT_MIGRATION*.md
+*_GUIDE.md
+*_SUMMARY.md
+*_FIX*.md 

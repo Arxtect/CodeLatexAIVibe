@@ -6,6 +6,7 @@ import { ShortcutManager } from './ShortcutManager.js';
 import { SettingsUI } from './SettingsUI.js';
 import { VersionManager } from './VersionManager.js';
 import { VersionSidebar } from './VersionSidebar.js';
+import { AgentAPI } from './AgentAPI.js';
 
 export class IDE {
     constructor() {
@@ -17,6 +18,7 @@ export class IDE {
         this.settingsUI = null; // 将在 initUI 中初始化
         this.versionManager = new VersionManager();
         this.versionSidebar = null; // 将在 initUI 中初始化
+        this.agentAPI = new AgentAPI(this); // 初始化 Agent API
         this.openTabs = new Map(); // 存储打开的标签页
         this.currentFile = null;
         this.isDirty = false; // 当前文件是否有未保存的更改
@@ -36,6 +38,7 @@ export class IDE {
         this.shortcutManager.registerAction('toggleSidebar', () => this.toggleSidebar(), '切换侧边栏');
         this.shortcutManager.registerAction('toggleVersionSidebar', () => this.toggleVersionSidebar(), '切换版本侧边栏');
         this.shortcutManager.registerAction('createSnapshot', () => this.createSnapshot(), '创建快照');
+        this.shortcutManager.registerAction('toggleAgentPanel', () => this.toggleAgentPanel(), '切换 AI 助手');
         // undo/redo 在编辑器级别处理，避免冲突
     }
 
@@ -946,6 +949,33 @@ export class IDE {
                     }, 3000);
                 }
             }
+        }
+    }
+
+    /**
+     * 切换 Agent 面板
+     */
+    toggleAgentPanel() {
+        if (this.agentAPI) {
+            this.agentAPI.togglePanel();
+        }
+    }
+
+    /**
+     * 显示 Agent 面板
+     */
+    showAgentPanel() {
+        if (this.agentAPI) {
+            this.agentAPI.showPanel();
+        }
+    }
+
+    /**
+     * 隐藏 Agent 面板
+     */
+    hideAgentPanel() {
+        if (this.agentAPI) {
+            this.agentAPI.hidePanel();
         }
     }
 
