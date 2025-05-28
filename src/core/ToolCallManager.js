@@ -745,8 +745,40 @@ export class ToolCallManager {
     async writeFile(args) {
         const { file_path, content, encoding = 'utf8' } = args;
         
+        console.log(`开始写入文件: ${file_path}, 内容长度: ${content?.length || 0}`);
+        
         try {
+            // 验证参数
+            if (!file_path || typeof file_path !== 'string') {
+                throw new Error(`文件路径无效: ${file_path}`);
+            }
+            
+            if (content === undefined || content === null) {
+                throw new Error(`文件内容不能为空`);
+            }
+            
+            // 写入文件
             await this.ide.fileSystem.writeFile(file_path, content, encoding);
+            
+            // 验证文件是否真的被创建
+            try {
+                const exists = await this.ide.fileSystem.exists(file_path);
+                if (!exists) {
+                    throw new Error(`文件写入后验证失败，文件不存在: ${file_path}`);
+                }
+                
+                const stats = await this.ide.fileSystem.stat(file_path);
+                console.log(`文件写入验证成功: ${file_path}, 大小: ${stats.size}`);
+            } catch (verifyError) {
+                console.error(`文件写入验证失败: ${file_path}`, verifyError);
+                throw new Error(`文件写入验证失败: ${verifyError.message}`);
+            }
+            
+            // 更新IDE界面（如果文件在编辑器中打开）
+            if (this.ide.currentFile === file_path) {
+                console.log(`更新编辑器内容: ${file_path}`);
+                // 这里可以添加更新编辑器内容的逻辑
+            }
             
             return {
                 success: true,
@@ -756,10 +788,16 @@ export class ToolCallManager {
                 message: `文件 ${file_path} 创建/写入成功`
             };
         } catch (error) {
+            console.error(`写入文件失败: ${file_path}`, error);
             return {
                 success: false,
                 error: error.message,
-                file_path
+                file_path,
+                details: {
+                    content_length: content?.length || 0,
+                    encoding,
+                    error_type: error.constructor.name
+                }
             };
         }
     }

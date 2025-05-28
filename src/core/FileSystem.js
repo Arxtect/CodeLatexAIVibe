@@ -55,33 +55,62 @@ export class FileSystem {
     async writeFile(filePath, content, encoding = 'utf8') {
         this.ensureInitialized();
         
-        return new Promise((resolve, reject) => {
-            // 确保目录存在
-            const dir = filePath.substring(0, filePath.lastIndexOf('/'));
-            if (dir && dir !== '') {
-                this.fs.mkdir(dir, { recursive: true }, (mkdirErr) => {
-                    if (mkdirErr && mkdirErr.code !== 'EEXIST') {
-                        reject(mkdirErr);
-                        return;
-                    }
-                    
-                    this.fs.writeFile(filePath, content, encoding, (err) => {
-                        if (err) {
-                            reject(err);
-                        } else {
-                            resolve();
-                        }
-                    });
-                });
-            } else {
+        return new Promise(async (resolve, reject) => {
+            try {
+                // 确保目录存在
+                const dir = filePath.substring(0, filePath.lastIndexOf('/'));
+                if (dir && dir !== '') {
+                    await this.ensureDirectoryExists(dir);
+                }
+                
                 this.fs.writeFile(filePath, content, encoding, (err) => {
                     if (err) {
+                        console.error(`写入文件失败: ${filePath}`, err);
                         reject(err);
                     } else {
+                        console.log(`文件写入成功: ${filePath}`);
                         resolve();
                     }
                 });
+            } catch (error) {
+                console.error(`创建目录失败: ${filePath}`, error);
+                reject(error);
             }
+        });
+    }
+
+    async ensureDirectoryExists(dirPath) {
+        if (!dirPath || dirPath === '/' || dirPath === '') {
+            return;
+        }
+
+        try {
+            // 检查目录是否存在
+            const stats = await this.stat(dirPath);
+            if (stats.isDirectory()) {
+                return; // 目录已存在
+            }
+        } catch (error) {
+            // 目录不存在，需要创建
+        }
+
+        // 递归创建父目录
+        const parentDir = dirPath.substring(0, dirPath.lastIndexOf('/'));
+        if (parentDir && parentDir !== '') {
+            await this.ensureDirectoryExists(parentDir);
+        }
+
+        // 创建当前目录
+        return new Promise((resolve, reject) => {
+            this.fs.mkdir(dirPath, (err) => {
+                if (err && err.code !== 'EEXIST') {
+                    console.error(`创建目录失败: ${dirPath}`, err);
+                    reject(err);
+                } else {
+                    console.log(`目录创建成功: ${dirPath}`);
+                    resolve();
+                }
+            });
         });
     }
 
@@ -226,16 +255,21 @@ export class FileSystem {
                 }
                 
                 const fullPath = dirPath === '/' ? `/${file}` : `${dirPath}/${file}`;
-                const stats = await this.stat(fullPath);
                 
-                if (stats.isDirectory()) {
-                    tree.children.push(await this.getFileTree(fullPath, visitedPaths, currentDepth + 1, maxDepth));
-                } else {
-                    tree.children.push({
-                        name: file,
-                        path: fullPath,
-                        type: 'file'
-                    });
+                try {
+                    const stats = await this.stat(fullPath);
+                    
+                    if (stats.isDirectory()) {
+                        tree.children.push(await this.getFileTree(fullPath, visitedPaths, currentDepth + 1, maxDepth));
+                    } else {
+                        tree.children.push({
+                            name: file,
+                            path: fullPath,
+                            type: 'file'
+                        });
+                    }
+                } catch (statError) {
+                    console.warn(`获取文件状态失败: ${fullPath}`, statError);
                 }
             }
         } catch (err) {
