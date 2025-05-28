@@ -18,8 +18,7 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
             'auto-planning',
             'multi-step-execution',
             'context-awareness',
-            'openai-integration',
-            'tool-calling' // 新增工具调用能力
+            'openai-integration'
         ];
         
         // OpenAI 配置
@@ -32,8 +31,7 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
             timeout: 30, // 30秒超时（以秒为单位）
             maxRetries: 3,
             customContext: '',
-            enableStreaming: true, // 默认启用流式响应
-            enableToolCalling: true // 默认启用工具调用
+            enableStreaming: true // 默认启用流式响应
         };
         
         // 任务执行状态
@@ -50,14 +48,26 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
         super.onInit();
         
         // 初始化工具调用管理器
-        if (window.ide) {
-            this.toolCallManager = new ToolCallManager(window.ide);
-        }
+        this.initToolCallManager();
         
         // 注册 Agent 特有的钩子
         this.pluginManager.addHook('agent.message', this.handleAgentMessage.bind(this));
         
         this.log('info', 'LaTeX Master Agent 已初始化');
+    }
+    
+    /**
+     * 初始化工具调用管理器
+     */
+    async initToolCallManager() {
+        try {
+            if (window.ide) {
+                this.toolCallManager = new ToolCallManager(window.ide);
+                this.log('info', '工具调用管理器已初始化');
+            }
+        } catch (error) {
+            this.log('warn', '工具调用管理器初始化失败:', error.message);
+        }
     }
     
     /**
@@ -168,12 +178,6 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                     label: '启用流式响应',
                     type: 'checkbox',
                     description: '开启后 AI 回答将实时显示，提供更流畅的体验'
-                },
-                {
-                    key: 'enableToolCalling',
-                    label: '启用工具调用',
-                    type: 'checkbox',
-                    description: '开启后 AI 可以主动请求项目数据'
                 }
             ],
             actions: [
@@ -285,8 +289,7 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
             timeout: 30, // 30秒
             maxRetries: 3,
             customContext: '',
-            enableStreaming: true, // 默认启用流式响应
-            enableToolCalling: true // 默认启用工具调用
+            enableStreaming: true // 默认启用流式响应
         };
     }
     
@@ -319,15 +322,35 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
             // 收集上下文
             const fullContext = await this.collectContext(message, context);
             
-            // 分析任务并生成执行计划
-            const plan = await this.analyzeAndPlan(message, fullContext, onStream);
+            // 分析任务并生成执行计划或直接响应
+            const result = await this.analyzeAndPlan(message, fullContext, onStream);
             
-            if (!plan) {
+            if (!result) {
                 return this.createResponse('❌ 无法理解您的需求，请重新描述');
             }
             
-            // 执行计划
-            return await this.executePlan(plan, fullContext);
+            // 处理不同类型的响应
+            if (result.isToolCallResponse) {
+                // 工具调用响应，直接返回内容
+                this.log('info', '返回工具调用响应');
+                return this.createResponse(result.content);
+            } else if (result.isTaskCompleted) {
+                // 任务完成，返回完成消息
+                this.log('info', '任务已完成');
+                return this.createResponse(`✅ ${result.content}`);
+            } else if (result.isDirectResponse) {
+                // 直接响应，不需要执行计划
+                this.log('info', '返回直接响应');
+                return this.createResponse(result.content);
+            } else if (result.steps && Array.isArray(result.steps)) {
+                // 执行计划，需要执行
+                this.log('info', '执行计划模式');
+                return await this.executePlan(result, fullContext);
+            } else {
+                // 未知响应类型
+                this.log('warn', '未知的响应类型', result);
+                return this.createResponse('❌ 响应格式异常，请重试');
+            }
             
         } catch (error) {
             this.handleError(error, 'processMessage');
@@ -390,7 +413,33 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                 { role: 'user', content: userPrompt }
             ], useStreaming ? onStream : null);
             
-            const plan = this.parsePlanResponse(response);
+            this.log('info', `收到响应类型: ${typeof response}`);
+            this.log('info', `收到响应: ${typeof response === 'string' ? response.substring(0, 100) + '...' : JSON.stringify(response).substring(0, 100) + '...'}`);
+            
+            // 检查响应类型
+            if (typeof response === 'object' && response.isToolCallResponse) {
+                // 这是工具调用的响应，直接返回
+                this.log('info', '工具调用完成，返回最终响应');
+                return {
+                    isToolCallResponse: true,
+                    content: response.content
+                };
+            }
+            
+            // 确保response是字符串类型
+            const responseText = typeof response === 'string' ? response : JSON.stringify(response);
+            
+            // 检查是否是任务完成标识符
+            if (responseText.trim().startsWith('TASK_COMPLETED:')) {
+                this.log('info', '任务已完成');
+                return {
+                    isTaskCompleted: true,
+                    content: responseText.trim()
+                };
+            }
+            
+            // 尝试解析为执行计划
+            const plan = this.parsePlanResponse(responseText);
             
             if (plan) {
                 this.currentPlan = plan;
@@ -398,12 +447,18 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                 plan.steps.forEach((step, i) => {
                     this.log('info', `  ${i + 1}. ${step.description}`);
                 });
+                return plan;
             }
             
-            return plan;
+            // 如果既不是工具调用也不是有效计划，返回直接响应
+            this.log('info', '返回直接响应（非计划模式）');
+            return {
+                isDirectResponse: true,
+                content: responseText
+            };
             
         } catch (error) {
-            this.log('error', '计划生成失败', error);
+            this.log('error', '任务分析失败', error);
             throw error;
         }
     }
@@ -412,9 +467,29 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
      * 构建系统提示词
      */
     buildSystemPrompt() {
-        let systemPrompt = `你是 LaTeX Master，一个智能的 LaTeX 文档助手。你的任务是分析用户需求，制定详细的执行计划，并生成相应的操作指令。
+        let systemPrompt = `你是 LaTeX Master，一个智能的 LaTeX 文档助手。
 
-你可以执行以下类型的操作：
+**🔧 工作模式说明：**
+
+你有两种工作模式：
+
+**1. 工具调用模式（Tool Calling）**
+- 当你需要获取项目信息时使用
+- 可用工具：read_file, list_files, get_file_structure, search_in_files 等
+- 使用场景：用户要求分析现有文件但没有提供文件内容时
+- 工具调用完成后，你会收到结果并基于结果生成最终回答
+
+**2. 执行计划模式（Execution Plan）**
+- 当你有足够信息执行具体任务时使用
+- 生成JSON格式的执行计划，包含具体的操作步骤
+- 支持的操作类型：create, edit, delete, move, search, compile, terminal, ui
+
+**重要决策规则：**
+- 如果用户要求分析、修改现有文件但上下文中没有文件内容 → 使用工具调用获取信息
+- 如果有足够信息执行任务 → 生成执行计划
+- 如果只需要回答问题或提供建议 → 直接回答
+
+**执行计划中的操作类型（不要与工具调用混淆）：**
 1. **create** - 创建新文件
 2. **edit** - 编辑现有文件（支持精确的行范围编辑）
 3. **delete** - 删除文件
@@ -424,58 +499,9 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
 7. **terminal** - 执行终端命令
 8. **ui** - 用户界面操作
 
-**重要：你必须生成可直接执行的具体操作步骤。**`;
+**注意：执行计划中不要使用工具调用类型（如 read_file, list_files 等）！**
 
-        // 如果启用了工具调用，添加工具说明
-        if (this.config.enableToolCalling && this.toolCallManager) {
-            systemPrompt += `
-
-**🔧 工具调用能力：**
-你可以主动调用以下工具来获取项目信息：
-
-📁 **文件系统工具：**
-- \`read_file\`: 读取指定文件的内容
-- \`list_files\`: 列出目录下的文件和文件夹
-- \`get_file_structure\`: 获取完整的项目文件结构树
-
-📝 **编辑器工具：**
-- \`get_current_file\`: 获取当前打开文件的信息和内容
-- \`get_selection\`: 获取编辑器中选中的文本
-- \`get_cursor_position\`: 获取光标位置信息
-
-🔍 **搜索工具：**
-- \`search_in_files\`: 在项目文件中搜索指定文本
-
-📊 **项目信息工具：**
-- \`get_project_info\`: 获取项目基本信息和统计数据
-- \`get_open_tabs\`: 获取当前打开的标签页信息
-- \`get_recent_changes\`: 获取最近的文件变更历史
-
-**使用建议：**
-1. 在分析用户需求时，主动使用工具获取必要的上下文信息
-2. 如果用户提到特定文件，使用 \`read_file\` 获取文件内容
-3. 如果需要了解项目结构，使用 \`get_file_structure\` 或 \`list_files\`
-4. 如果需要搜索特定内容，使用 \`search_in_files\`
-5. 优先使用工具获取准确信息，而不是依赖用户提供的上下文
-
-**工具调用时机：**
-- 用户询问特定文件内容时
-- 需要了解项目结构时
-- 需要搜索代码或文档时
-- 分析问题需要更多上下文时`;
-        }
-
-        systemPrompt += `
-
-对于文件编辑操作，你需要：
-1. 先读取文件内容（如果用户提供了上下文）
-2. 分析需要修改的具体位置
-3. 生成精确的编辑指令，包括：
-   - 起始行号和结束行号
-   - 要替换的内容
-   - 新的内容
-
-请根据用户需求，生成一个详细的执行计划，格式如下：
+当生成执行计划时，请使用以下格式：
 
 \`\`\`json
 {
@@ -486,8 +512,8 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
       "id": 1,
       "type": "edit",
       "description": "删除重复内容",
-      "target": "/images/README.md",
-      "content": "# 图片文件夹\\n\\n请将图片文件放在这个文件夹中。\\n\\n支持的格式：\\n- PNG\\n- JPG\\n- JPEG\\n- GIF\\n- SVG\\n\\n## 使用说明\\n\\n1. 将图片文件拖拽到此文件夹\\n2. 在LaTeX文档中引用图片\\n3. 使用相对路径引用",
+      "target": "/main.tex",
+      "content": "新的文件内容",
       "editType": "replace",
       "startLine": 1,
       "endLine": -1,
@@ -667,26 +693,33 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                     requestBody.max_tokens = this.config.maxTokens;
                 }
                 
-                // 智能选择模式：
-                // 1. 如果启用工具调用且有工具可用，检查是否需要工具调用
-                // 2. 如果需要工具调用，优先使用工具调用（禁用流模式）
-                // 3. 否则根据用户配置决定是否使用流模式
+                // 智能选择模式：检查是否需要工具调用
                 let useToolCalling = false;
                 let useStreaming = !!onStream && this.config.enableStreaming;
                 
-                if (this.config.enableToolCalling && this.toolCallManager) {
+                if (this.toolCallManager) {
                     const tools = this.toolCallManager.getToolDefinitions();
                     if (tools.length > 0) {
-                        // 检查消息内容是否可能需要工具调用
-                        const lastMessage = conversationMessages[conversationMessages.length - 1];
-                        const needsTools = this.shouldUseTools(lastMessage?.content || '');
+                        // 计算工具调用轮次，防止无限循环
+                        const toolCallRounds = conversationMessages.filter(msg => msg.role === 'assistant' && msg.tool_calls).length;
+                        const maxToolCallRounds = 3; // 最大允许3轮工具调用
                         
-                        if (needsTools) {
-                            useToolCalling = true;
-                            useStreaming = false; // 工具调用时禁用流模式
-                            requestBody.tools = tools;
-                            requestBody.tool_choice = 'auto';
-                            this.log('info', `启用工具调用模式，可用工具: ${tools.length} 个`);
+                        if (toolCallRounds < maxToolCallRounds) {
+                            // 检查最后一条用户消息或助手消息是否需要工具调用
+                            const lastMessage = conversationMessages[conversationMessages.length - 1];
+                            const needsTools = this.shouldUseTools(lastMessage?.content || '', conversationMessages);
+                            
+                            if (needsTools) {
+                                useToolCalling = true;
+                                useStreaming = false; // 工具调用时禁用流模式
+                                requestBody.tools = tools;
+                                requestBody.tool_choice = 'auto';
+                                this.log('info', `启用工具调用模式 (第${toolCallRounds + 1}轮)，可用工具: ${tools.length} 个`);
+                            } else {
+                                this.log('info', '当前消息不需要工具调用');
+                            }
+                        } else {
+                            this.log('warn', `已达到最大工具调用轮次 (${maxToolCallRounds})，禁用工具调用`);
                         }
                     }
                 }
@@ -745,7 +778,9 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                         // 检查是否有工具调用
                         if (choice.message && choice.message.tool_calls && choice.message.tool_calls.length > 0) {
                             this.log('info', `收到 ${choice.message.tool_calls.length} 个工具调用请求`);
-                            return await this.handleToolCalls(choice.message, conversationMessages, onStream);
+                            const toolCallResult = await this.handleToolCalls(choice.message, conversationMessages, onStream);
+                            // handleToolCalls返回的是对象，我们需要返回这个对象以便在analyzeAndPlan中正确处理
+                            return toolCallResult;
                         }
                         
                         // 普通消息响应
@@ -780,32 +815,6 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
         }
         
         throw lastError || new Error('OpenAI API 调用失败');
-    }
-    
-    /**
-     * 判断是否需要使用工具
-     */
-    shouldUseTools(message) {
-        if (!message) return false;
-        
-        // 检查消息中是否包含需要工具调用的关键词
-        const toolKeywords = [
-            '读取文件', '查看文件', '获取文件', '文件内容',
-            '列出文件', '文件列表', '目录结构', '项目结构',
-            '搜索', '查找', '检索',
-            '当前文件', '打开的文件', '编辑器',
-            '选中', '光标', '位置',
-            '项目信息', '统计', '概览',
-            '扩写', '扩展', '完善', '补充', '创建',
-            '帮我', '请', '能否', '可以',
-            'latex', 'tex', '文档', '论文'
-        ];
-        
-        const lowerMessage = message.toLowerCase();
-        return toolKeywords.some(keyword => 
-            lowerMessage.includes(keyword) || 
-            lowerMessage.includes(keyword.toLowerCase())
-        );
     }
     
     /**
@@ -896,23 +905,62 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
      */
     parsePlanResponse(response) {
         try {
-            // 提取 JSON 部分
-            const jsonMatch = response.match(/```json\n([\s\S]*?)\n```/);
-            if (!jsonMatch) {
-                throw new Error('响应中未找到有效的 JSON 格式');
+            this.log('info', `解析计划响应，长度: ${response.length}`);
+            this.log('info', `响应前100字符: ${response.substring(0, 100)}...`);
+            
+            let jsonText = null;
+            
+            // 方法1: 尝试提取 ```json 代码块
+            const jsonMatch = response.match(/```json\s*\n([\s\S]*?)\n\s*```/);
+            if (jsonMatch) {
+                jsonText = jsonMatch[1].trim();
+                this.log('info', '找到JSON代码块');
             }
             
-            const plan = JSON.parse(jsonMatch[1]);
+            // 方法2: 如果没有代码块，尝试查找JSON对象
+            if (!jsonText) {
+                const jsonObjectMatch = response.match(/\{[\s\S]*\}/);
+                if (jsonObjectMatch) {
+                    jsonText = jsonObjectMatch[0];
+                    this.log('info', '找到JSON对象');
+                }
+            }
+            
+            // 方法3: 如果整个响应看起来像JSON，直接使用
+            if (!jsonText) {
+                const trimmedResponse = response.trim();
+                if (trimmedResponse.startsWith('{') && trimmedResponse.endsWith('}')) {
+                    jsonText = trimmedResponse;
+                    this.log('info', '整个响应是JSON');
+                }
+            }
+            
+            if (!jsonText) {
+                this.log('warn', '响应中未找到有效的JSON格式');
+                this.log('warn', `完整响应: ${response}`);
+                return null;
+            }
+            
+            this.log('info', `提取的JSON文本: ${jsonText.substring(0, 200)}...`);
+            
+            // 解析JSON
+            const plan = JSON.parse(jsonText);
             
             // 验证计划格式
             if (!plan.steps || !Array.isArray(plan.steps)) {
-                throw new Error('计划格式无效：缺少 steps 数组');
+                this.log('error', '计划格式无效：缺少 steps 数组');
+                this.log('error', `解析的计划对象: ${JSON.stringify(plan, null, 2)}`);
+                return null;
             }
             
+            this.log('info', `成功解析计划，包含 ${plan.steps.length} 个步骤`);
             return plan;
             
         } catch (error) {
-            this.log('error', '计划解析失败', { error: error.message, response });
+            this.log('error', '计划解析失败', { 
+                error: error.message, 
+                response: response.substring(0, 500) + '...' 
+            });
             return null;
         }
     }
@@ -990,14 +1038,35 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                     return this.createUIAction(step.action || 'showMessage', {
                         message: step.content || step.description
                     });
+                
+                // 支持工具调用类型的步骤
+                case 'list_files':
+                case 'read_file':
+                case 'get_file_structure':
+                case 'search_in_files':
+                case 'get_current_file':
+                case 'get_selection':
+                case 'get_cursor_position':
+                case 'get_project_info':
+                case 'get_open_tabs':
+                case 'get_recent_changes':
+                    // 这些是工具调用类型，应该在工具调用阶段处理，不应该出现在执行计划中
+                    this.log('warn', `步骤类型 ${step.type} 应该通过工具调用处理，而不是执行计划`);
+                    return this.createUIAction('showMessage', {
+                        message: `⚠️ 步骤 "${step.description}" 需要通过工具调用处理，请重新生成计划`
+                    });
                     
                 default:
                     this.log('warn', `未知的步骤类型: ${step.type}`);
-                    return null;
+                    return this.createUIAction('showMessage', {
+                        message: `❌ 未知的步骤类型: ${step.type}`
+                    });
             }
         } catch (error) {
             this.log('error', '创建动作失败', error);
-            return null;
+            return this.createUIAction('showMessage', {
+                message: `❌ 创建动作失败: ${error.message}`
+            });
         }
     }
     
@@ -1122,6 +1191,116 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
         }
     }
     
+    onDestroy() {
+        super.onDestroy();
+        
+        // 清理资源
+        if (this.contextCollector) {
+            this.contextCollector.clearCache();
+        }
+    }
+    
+    /**
+     * 判断是否需要使用工具
+     */
+    shouldUseTools(message, conversationMessages = []) {
+        if (!message) return false;
+        
+        // 检查消息中是否包含需要工具调用的关键词
+        const toolKeywords = [
+            // 文件操作相关
+            '读取文件', '查看文件', '获取文件', '文件内容', '文件信息',
+            '列出文件', '文件列表', '目录结构', '项目结构', '文件结构',
+            
+            // 项目分析相关
+            '查看项目', '分析项目', '项目概览', '项目信息', '整个项目',
+            '所有文件', '全部文件', '项目中的文件',
+            
+            // 搜索相关
+            '搜索', '查找', '检索', '寻找',
+            
+            // 编辑器状态
+            '当前文件', '打开的文件', '编辑器', '正在编辑',
+            '选中', '光标', '位置',
+            
+            // 内容分析和扩展
+            '扩写', '扩展', '完善', '补充', '创建', '新建',
+            '分析', '修改', '优化', '去重', '重复',
+            '章节', '内容', '文档',
+            
+            // 通用请求词
+            '帮我', '请', '能否', '可以', '需要',
+            
+            // LaTeX相关
+            'latex', 'tex', '文档', '论文', '报告'
+        ];
+        
+        const lowerMessage = message.toLowerCase();
+        const hasToolKeywords = toolKeywords.some(keyword => lowerMessage.includes(keyword));
+        
+        // 如果消息本身不包含工具关键词，直接返回false
+        if (!hasToolKeywords) {
+            this.log('info', `工具调用判断: "${message.substring(0, 50)}..." -> false (无工具关键词)`);
+            return false;
+        }
+        
+        // 特殊情况：如果用户明确要求查看、分析或扩写项目内容，优先使用工具调用
+        const projectAnalysisKeywords = [
+            '查看.*项目', '分析.*项目', '整个项目', '所有.*章节', '扩写.*章节',
+            '新建.*章节', '完善.*文档', '优化.*结构'
+        ];
+        
+        const needsProjectAnalysis = projectAnalysisKeywords.some(pattern => {
+            const regex = new RegExp(pattern, 'i');
+            return regex.test(message);
+        });
+        
+        if (needsProjectAnalysis) {
+            this.log('info', `工具调用判断: "${message.substring(0, 50)}..." -> true (需要项目分析)`);
+            return true;
+        }
+        
+        // 检查是否已经有足够的上下文信息
+        if (conversationMessages && conversationMessages.length > 0) {
+            const toolResults = conversationMessages.filter(msg => msg.role === 'tool');
+            
+            // 如果已经有工具调用结果，检查是否需要更多信息
+            if (toolResults.length > 0) {
+                // 分析最近的工具调用结果
+                const recentToolResult = toolResults[toolResults.length - 1];
+                try {
+                    const result = JSON.parse(recentToolResult.content);
+         
+                    // 如果最近的工具调用失败，可能需要尝试其他工具
+                    if (!result.success) {
+                        this.log('info', `工具调用判断: "${message.substring(0, 50)}..." -> true (上次工具调用失败)`);
+                        return true;
+                    }
+                    
+                    // 检查是否需要基于已有结果进行进一步的工具调用
+                    // 例如：获取了文件列表后，可能需要读取具体文件
+                    if (result.files && Array.isArray(result.files) && result.files.length > 0) {
+                        // 如果有文件列表但消息中提到具体文件操作，可能需要读取文件
+                        const needsFileContent = /读取|查看|内容|分析|修改|编辑|扩写/.test(lowerMessage);
+                        if (needsFileContent) {
+                            this.log('info', `工具调用判断: "${message.substring(0, 50)}..." -> true (需要读取文件内容)`);
+                            return true;
+                        }
+                    }
+                    
+                } catch (error) {
+                    // 解析失败，可能需要重新调用工具
+                    this.log('info', `工具调用判断: "${message.substring(0, 50)}..." -> true (工具结果解析失败)`);
+                    return true;
+                }
+            }
+        }
+        
+        // 默认情况下，如果有工具关键词就启用工具调用
+        this.log('info', `工具调用判断: "${message.substring(0, 50)}..." -> true (包含工具关键词)`);
+        return true;
+    }
+    
     /**
      * 处理工具调用
      */
@@ -1134,6 +1313,7 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
         // 显示工具调用面板
         let toolCallId = null;
         if (window.agentPanel && typeof window.agentPanel.showToolCallPanel === 'function') {
+            this.log('info', '显示工具调用面板...');
             toolCallId = window.agentPanel.showToolCallPanel(assistantMessage.tool_calls);
         }
         
@@ -1142,18 +1322,17 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
             const toolCall = assistantMessage.tool_calls[i];
             
             try {
-                this.log('info', `执行工具调用: ${toolCall.function.name}`);
+                this.log('info', `执行工具调用 ${i + 1}/${assistantMessage.tool_calls.length}: ${toolCall.function.name}`);
                 
                 // 更新工具调用状态为执行中
                 if (toolCallId && window.agentPanel && typeof window.agentPanel.updateToolCallStep === 'function') {
                     window.agentPanel.updateToolCallStep(toolCallId, i, 'executing');
                 }
                 
-                // 解析参数
-                const args = JSON.parse(toolCall.function.arguments);
-                
                 // 执行工具调用
                 const result = await this.toolCallManager.executeToolCall(toolCall);
+                
+                this.log('info', `工具调用结果: ${JSON.stringify(result).substring(0, 200)}...`);
                 
                 // 添加工具调用结果到对话历史
                 conversationMessages.push({
@@ -1166,8 +1345,6 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                 if (toolCallId && window.agentPanel && typeof window.agentPanel.updateToolCallStep === 'function') {
                     window.agentPanel.updateToolCallStep(toolCallId, i, 'success', result);
                 }
-                
-                this.log('info', `工具调用完成: ${toolCall.function.name}`);
                 
             } catch (error) {
                 this.log('error', `工具调用失败: ${toolCall.function.name}`, error);
@@ -1198,16 +1375,13 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
         
         // 再次调用 API 获取最终响应
         this.log('info', '工具调用完成，获取最终响应...');
-        return await this.callOpenAI(conversationMessages, onStream);
-    }
-    
-    onDestroy() {
-        super.onDestroy();
+        const finalResponse = await this.callOpenAI(conversationMessages, onStream);
         
-        // 清理资源
-        if (this.contextCollector) {
-            this.contextCollector.clearCache();
-        }
+        // 返回标记为工具调用响应的对象
+        return {
+            isToolCallResponse: true,
+            content: finalResponse
+        };
     }
 }
 

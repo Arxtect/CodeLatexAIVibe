@@ -113,6 +113,9 @@ export class AgentPanelPlugin {
                             rows="1"
                         ></textarea>
                         <div class="chat-input-actions">
+                            <button id="chat-new-conversation-btn" class="btn-new-conversation" title="新建对话">
+                                <span class="new-conversation-icon">💬</span>
+                            </button>
                             <button id="chat-send-btn" class="btn-send" title="发送 (Enter)">
                                 <span class="send-icon">📤</span>
                             </button>
@@ -313,6 +316,10 @@ export class AgentPanelPlugin {
                 align-items: flex-start;
             }
             
+            .message.system {
+                align-items: center;
+            }
+            
             .message-header {
                 display: flex;
                 align-items: center;
@@ -342,6 +349,11 @@ export class AgentPanelPlugin {
                 color: white;
             }
             
+            .message-avatar.system {
+                background: var(--warning-color, #fd7e14);
+                color: white;
+            }
+            
             .message-content {
                 max-width: 85%;
                 padding: 8px 12px;
@@ -362,6 +374,15 @@ export class AgentPanelPlugin {
                 color: var(--text-color, #333);
                 border: 1px solid var(--border-color, #e0e0e0);
                 border-bottom-left-radius: 4px;
+            }
+            
+            .message.system .message-content {
+                background: var(--warning-light, #fff3cd);
+                color: var(--warning-dark, #856404);
+                border: 1px solid var(--warning-color, #fd7e14);
+                border-radius: 12px;
+                text-align: center;
+                font-weight: 500;
             }
             
             .message-content pre {
@@ -545,7 +566,7 @@ export class AgentPanelPlugin {
                 gap: 4px;
             }
             
-            .btn-send, .btn-clear {
+            .btn-send, .btn-clear, .btn-new-conversation {
                 width: 36px;
                 height: 36px;
                 border: none;
@@ -555,6 +576,16 @@ export class AgentPanelPlugin {
                 align-items: center;
                 justify-content: center;
                 transition: all 0.2s;
+            }
+            
+            .btn-new-conversation {
+                background: var(--success-color, #28a745);
+                color: white;
+            }
+            
+            .btn-new-conversation:hover {
+                background: var(--success-dark, #1e7e34);
+                transform: scale(1.05);
             }
             
             .btn-send {
@@ -983,6 +1014,7 @@ export class AgentPanelPlugin {
         const chatInput = this.panel.querySelector('#chat-input');
         const sendBtn = this.panel.querySelector('#chat-send-btn');
         const clearBtn = this.panel.querySelector('#chat-clear-btn');
+        const newConversationBtn = this.panel.querySelector('#chat-new-conversation-btn');
         
         chatInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
@@ -1002,6 +1034,10 @@ export class AgentPanelPlugin {
         
         clearBtn.addEventListener('click', () => {
             this.clearChat();
+        });
+        
+        newConversationBtn.addEventListener('click', () => {
+            this.newConversation();
         });
         
         // 上下文管理按钮
@@ -1180,6 +1216,7 @@ export class AgentPanelPlugin {
      */
     async sendMessage() {
         const input = this.panel.querySelector('#chat-input');
+        const sendBtn = this.panel.querySelector('#chat-send-btn');
         const message = input.value.trim();
         
         if (!message) return;
@@ -1189,6 +1226,12 @@ export class AgentPanelPlugin {
             alert('请先选择一个 Agent');
             return;
         }
+        
+        // 禁用发送按钮和输入框
+        sendBtn.disabled = true;
+        input.disabled = true;
+        sendBtn.style.opacity = '0.6';
+        input.style.opacity = '0.6';
         
         // 添加用户消息到界面
         this.addMessage('user', message);
@@ -1264,6 +1307,42 @@ export class AgentPanelPlugin {
             this.updateStreamMessage(streamMessageId, `错误: ${error.message}`);
             this.hideTypingIndicator();
             this.updateStatus('connected', '已连接');
+        } finally {
+            // 重新启用发送按钮和输入框
+            sendBtn.disabled = false;
+            input.disabled = false;
+            sendBtn.style.opacity = '1';
+            input.style.opacity = '1';
+            input.focus(); // 重新聚焦到输入框
+        }
+    }
+    
+    /**
+     * 新建对话
+     */
+    newConversation() {
+        // 确认对话框
+        if (this.chatHistory.length > 0) {
+            const confirmed = confirm('确定要开始新对话吗？这将清空当前的聊天历史和上下文。');
+            if (!confirmed) return;
+        }
+        
+        // 清空聊天历史
+        this.clearChat();
+        
+        // 清空上下文
+        this.clearContext();
+        
+        // 显示新对话开始消息
+        this.addMessage('system', '🆕 新对话已开始');
+        
+        // 显示通知
+        this.showNotification('新对话已开始，聊天历史和上下文已清空', 'success');
+        
+        // 聚焦到输入框
+        const input = this.panel.querySelector('#chat-input');
+        if (input) {
+            input.focus();
         }
     }
     
@@ -1278,7 +1357,7 @@ export class AgentPanelPlugin {
         panel.className = 'execution-panel';
         panel.id = executionId;
         panel.innerHTML = `
-            <div class="execution-header" onclick="this.parentElement.classList.toggle('collapsed')">
+            <div class="execution-header">
                 <span class="execution-title">🚀 执行计划</span>
                 <span class="execution-progress">0/${actions.length}</span>
                 <span class="execution-toggle">▼</span>
@@ -1297,6 +1376,12 @@ export class AgentPanelPlugin {
                 </div>
             </div>
         `;
+        
+        // 添加点击事件处理
+        const header = panel.querySelector('.execution-header');
+        header.addEventListener('click', () => {
+            panel.classList.toggle('collapsed');
+        });
         
         // 插入到消息容器中
         const messagesContainer = this.panel.querySelector('#chat-messages');
@@ -1388,45 +1473,32 @@ export class AgentPanelPlugin {
             console.warn(`执行面板未找到: ${executionId}`);
             return;
         }
-        
+
         const header = executionPanel.querySelector('.execution-header');
         if (!header) {
             console.warn(`执行面板头部未找到: ${executionId}`);
             return;
         }
-        
+
         const successSteps = executionPanel.querySelectorAll('.step-status.success').length;
         const errorSteps = executionPanel.querySelectorAll('.step-status.error').length;
         const totalSteps = executionPanel.querySelectorAll('.execution-step').length;
-        
+
         // 更新标题
         const title = header.querySelector('.execution-title');
         if (title) {
             if (errorSteps === 0) {
                 title.textContent = `✅ 执行完成 (${totalSteps} 个步骤全部成功)`;
-                header.classList.add('success');
+                header.classList.add('completed');
             } else {
                 title.textContent = `⚠️ 执行完成 (${successSteps} 成功, ${errorSteps} 失败)`;
                 header.classList.add('partial-success');
             }
         }
-        
+
         // 添加完成状态
         executionPanel.classList.add('completed');
-        
-        // 添加点击折叠/展开功能
-        header.addEventListener('click', () => {
-            executionPanel.classList.toggle('collapsed');
-        });
-        
-        // 添加折叠指示器（如果还没有的话）
-        if (!header.querySelector('.collapse-indicator')) {
-            const collapseIndicator = document.createElement('span');
-            collapseIndicator.className = 'collapse-indicator';
-            collapseIndicator.textContent = '▼';
-            header.appendChild(collapseIndicator);
-        }
-        
+
         // 3秒后自动折叠
         setTimeout(() => {
             if (executionPanel.parentNode) {
@@ -1475,6 +1547,9 @@ export class AgentPanelPlugin {
         if (role === 'user') {
             avatar = '👤';
             name = '您';
+        } else if (role === 'system') {
+            avatar = '🔔';
+            name = '系统';
         } else {
             avatar = '🤖';
             const activeAgent = this.pluginManager.getActiveAgent();
@@ -1561,18 +1636,16 @@ export class AgentPanelPlugin {
      * 清空聊天记录
      */
     clearChat() {
-        if (confirm('确定要清空聊天记录吗？')) {
-            const messagesContainer = this.panel.querySelector('#chat-messages');
-            messagesContainer.innerHTML = '';
-            
-            // 清空历史记录
-            this.chatHistory = [];
-            
-            // 显示欢迎消息
-            const welcomeMsg = this.panel.querySelector('.welcome-message');
-            if (welcomeMsg) {
-                welcomeMsg.style.display = 'block';
-            }
+        const messagesContainer = this.panel.querySelector('#chat-messages');
+        messagesContainer.innerHTML = '';
+        
+        // 清空历史记录
+        this.chatHistory = [];
+        
+        // 显示欢迎消息
+        const welcomeMsg = this.panel.querySelector('.welcome-message');
+        if (welcomeMsg) {
+            welcomeMsg.style.display = 'block';
         }
     }
     
