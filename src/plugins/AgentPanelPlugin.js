@@ -693,6 +693,222 @@ export class AgentPanelPlugin {
                 background: var(--bg-secondary, #f8f9fa);
                 border-radius: 2px;
             }
+            
+            /* 执行面板样式 */
+            .execution-panel {
+                margin: 16px 0;
+                border: 1px solid var(--border-color, #e0e0e0);
+                border-radius: 8px;
+                background: var(--bg-color, #ffffff);
+                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+                overflow: hidden;
+                transition: all 0.3s ease;
+            }
+            
+            .execution-panel.collapsed {
+                max-height: 60px;
+                overflow: hidden;
+            }
+            
+            .execution-panel.collapsed .execution-steps {
+                display: none;
+            }
+            
+            .execution-header {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                padding: 12px 16px;
+                background: var(--bg-secondary, #f8f9fa);
+                border-bottom: 1px solid var(--border-color, #e0e0e0);
+                transition: background-color 0.3s ease;
+            }
+            
+            .execution-header.success {
+                background: #d4edda;
+                border-bottom-color: #c3e6cb;
+            }
+            
+            .execution-header.partial-success {
+                background: #fff3cd;
+                border-bottom-color: #ffeaa7;
+            }
+            
+            .execution-icon {
+                font-size: 16px;
+                margin-right: 8px;
+            }
+            
+            .execution-title {
+                flex: 1;
+                font-weight: 600;
+                color: var(--text-color, #333);
+                font-size: 14px;
+            }
+            
+            .execution-progress {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                min-width: 120px;
+            }
+            
+            .progress-bar {
+                flex: 1;
+                height: 6px;
+                background: var(--bg-tertiary, #e9ecef);
+                border-radius: 3px;
+                overflow: hidden;
+            }
+            
+            .progress-fill {
+                height: 100%;
+                background: linear-gradient(90deg, #007bff, #0056b3);
+                border-radius: 3px;
+                transition: width 0.3s ease;
+            }
+            
+            .progress-text {
+                font-size: 12px;
+                color: var(--text-secondary, #666);
+                font-weight: 500;
+                min-width: 30px;
+                text-align: right;
+            }
+            
+            .execution-steps {
+                padding: 8px 0;
+            }
+            
+            .execution-step {
+                display: flex;
+                align-items: center;
+                padding: 8px 16px;
+                transition: background-color 0.2s ease;
+            }
+            
+            .execution-step:hover {
+                background: var(--hover-bg, #f8f9fa);
+            }
+            
+            .step-icon {
+                width: 24px;
+                height: 24px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 14px;
+                margin-right: 12px;
+                border-radius: 50%;
+                transition: all 0.3s ease;
+            }
+            
+            .step-icon.executing {
+                background: #fff3cd;
+                animation: pulse-executing 1.5s infinite;
+            }
+            
+            .step-icon.success {
+                background: #d4edda;
+                transform: scale(1.1);
+            }
+            
+            .step-icon.error {
+                background: #f8d7da;
+                transform: scale(1.1);
+            }
+            
+            @keyframes pulse-executing {
+                0%, 100% { 
+                    transform: scale(1);
+                    opacity: 1;
+                }
+                50% { 
+                    transform: scale(1.05);
+                    opacity: 0.8;
+                }
+            }
+            
+            .step-content {
+                flex: 1;
+                display: flex;
+                flex-direction: column;
+                gap: 2px;
+            }
+            
+            .step-description {
+                font-size: 13px;
+                color: var(--text-color, #333);
+                font-weight: 500;
+            }
+            
+            .step-status {
+                font-size: 11px;
+                color: var(--text-secondary, #666);
+                transition: color 0.3s ease;
+            }
+            
+            .step-status.executing {
+                color: #856404;
+                font-weight: 600;
+            }
+            
+            .step-status.success {
+                color: #155724;
+                font-weight: 600;
+            }
+            
+            .step-status.error {
+                color: #721c24;
+                font-weight: 600;
+            }
+            
+            /* 执行面板动画 */
+            .execution-panel {
+                animation: slideInUp 0.3s ease-out;
+            }
+            
+            @keyframes slideInUp {
+                from {
+                    opacity: 0;
+                    transform: translateY(20px);
+                }
+                to {
+                    opacity: 1;
+                    transform: translateY(0);
+                }
+            }
+            
+            /* 完成状态的特殊样式 */
+            .execution-panel.completed {
+                border-color: #28a745;
+            }
+            
+            .execution-panel.completed .execution-header {
+                cursor: pointer;
+            }
+            
+            .execution-panel.completed .execution-header:hover {
+                background: var(--hover-bg, #f8f9fa);
+            }
+            
+            /* 折叠指示器样式 */
+            .collapse-indicator {
+                font-size: 12px;
+                color: var(--text-secondary, #666);
+                transition: transform 0.3s ease;
+                cursor: pointer;
+                user-select: none;
+                margin-left: 8px;
+            }
+            
+            .execution-panel.collapsed .collapse-indicator {
+                transform: rotate(-90deg);
+            }
+            
+            .collapse-indicator:hover {
+                color: var(--text-color, #333);
+            }
         `;
         
         document.head.appendChild(styles);
@@ -880,11 +1096,35 @@ export class AgentPanelPlugin {
                 // 确保流式消息显示完整内容
                 this.updateStreamMessage(streamMessageId, response.content || response.text || '处理完成');
                 
-                // 执行 Agent 返回的动作
+                // 执行 Agent 返回的动作并显示执行过程
                 if (response.actions && response.actions.length > 0) {
-                    for (const action of response.actions) {
-                        await this.pluginManager.executeAgentAction(action);
+                    const executionId = this.showExecutionPanel(response.actions);
+                    
+                    for (let i = 0; i < response.actions.length; i++) {
+                        const action = response.actions[i];
+                        
+                        // 更新当前执行的操作
+                        this.updateExecutionStep(executionId, i, 'executing', `正在执行: ${this.getActionDescription(action)}`);
+                        
+                        try {
+                            const result = await this.pluginManager.executeAgentAction(action);
+                            
+                            if (result) {
+                                this.updateExecutionStep(executionId, i, 'success', `✅ ${this.getActionDescription(action)}`);
+                            } else {
+                                this.updateExecutionStep(executionId, i, 'error', `❌ ${this.getActionDescription(action)} (执行失败)`);
+                            }
+                        } catch (error) {
+                            console.error('动作执行失败:', error);
+                            this.updateExecutionStep(executionId, i, 'error', `❌ ${this.getActionDescription(action)} (${error.message})`);
+                        }
+                        
+                        // 短暂延迟，让用户看到执行过程
+                        await new Promise(resolve => setTimeout(resolve, 300));
                     }
+                    
+                    // 完成执行
+                    this.completeExecution(executionId);
                 }
             }
             
@@ -896,6 +1136,179 @@ export class AgentPanelPlugin {
             this.updateStreamMessage(streamMessageId, `错误: ${error.message}`);
             this.hideTypingIndicator();
             this.updateStatus('connected', '已连接');
+        }
+    }
+    
+    /**
+     * 显示执行面板
+     */
+    showExecutionPanel(actions) {
+        const messagesContainer = this.panel.querySelector('#chat-messages');
+        const executionId = `execution-${Date.now()}`;
+        
+        const executionPanel = document.createElement('div');
+        executionPanel.className = 'execution-panel';
+        executionPanel.id = executionId;
+        
+        const stepsHtml = actions.map((action, index) => `
+            <div class="execution-step" data-step="${index}">
+                <div class="step-icon">⏳</div>
+                <div class="step-content">
+                    <div class="step-description">${this.getActionDescription(action)}</div>
+                    <div class="step-status">等待执行</div>
+                </div>
+            </div>
+        `).join('');
+        
+        executionPanel.innerHTML = `
+            <div class="execution-header">
+                <span class="execution-icon">🔧</span>
+                <span class="execution-title">执行操作 (${actions.length} 个步骤)</span>
+                <div class="execution-progress">
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: 0%"></div>
+                    </div>
+                    <span class="progress-text">0/${actions.length}</span>
+                </div>
+            </div>
+            <div class="execution-steps">
+                ${stepsHtml}
+            </div>
+        `;
+        
+        messagesContainer.appendChild(executionPanel);
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        
+        return executionId;
+    }
+    
+    /**
+     * 更新执行步骤状态
+     */
+    updateExecutionStep(executionId, stepIndex, status, description) {
+        const executionPanel = document.getElementById(executionId);
+        if (!executionPanel) return;
+        
+        const step = executionPanel.querySelector(`[data-step="${stepIndex}"]`);
+        if (!step) return;
+        
+        const icon = step.querySelector('.step-icon');
+        const statusElement = step.querySelector('.step-status');
+        
+        // 更新图标和状态
+        switch (status) {
+            case 'executing':
+                icon.textContent = '⚡';
+                icon.className = 'step-icon executing';
+                statusElement.textContent = '执行中...';
+                statusElement.className = 'step-status executing';
+                break;
+            case 'success':
+                icon.textContent = '✅';
+                icon.className = 'step-icon success';
+                statusElement.textContent = '完成';
+                statusElement.className = 'step-status success';
+                break;
+            case 'error':
+                icon.textContent = '❌';
+                icon.className = 'step-icon error';
+                statusElement.textContent = '失败';
+                statusElement.className = 'step-status error';
+                break;
+        }
+        
+        // 更新描述
+        if (description) {
+            step.querySelector('.step-description').textContent = description;
+        }
+        
+        // 更新进度条
+        const completedSteps = executionPanel.querySelectorAll('.step-icon.success, .step-icon.error').length;
+        const totalSteps = executionPanel.querySelectorAll('.execution-step').length;
+        const progressPercent = (completedSteps / totalSteps) * 100;
+        
+        const progressFill = executionPanel.querySelector('.progress-fill');
+        const progressText = executionPanel.querySelector('.progress-text');
+        
+        if (progressFill) {
+            progressFill.style.width = `${progressPercent}%`;
+        }
+        if (progressText) {
+            progressText.textContent = `${completedSteps}/${totalSteps}`;
+        }
+        
+        // 滚动到底部
+        const messagesContainer = this.panel.querySelector('#chat-messages');
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }
+    
+    /**
+     * 完成执行
+     */
+    completeExecution(executionId) {
+        const executionPanel = document.getElementById(executionId);
+        if (!executionPanel) return;
+        
+        const header = executionPanel.querySelector('.execution-header');
+        const successSteps = executionPanel.querySelectorAll('.step-icon.success').length;
+        const errorSteps = executionPanel.querySelectorAll('.step-icon.error').length;
+        const totalSteps = executionPanel.querySelectorAll('.execution-step').length;
+        
+        // 更新标题
+        const title = header.querySelector('.execution-title');
+        if (errorSteps === 0) {
+            title.textContent = `✅ 执行完成 (${totalSteps} 个步骤全部成功)`;
+            header.classList.add('success');
+        } else {
+            title.textContent = `⚠️ 执行完成 (${successSteps} 成功, ${errorSteps} 失败)`;
+            header.classList.add('partial-success');
+        }
+        
+        // 添加完成状态
+        executionPanel.classList.add('completed');
+        
+        // 添加点击折叠/展开功能
+        header.addEventListener('click', () => {
+            executionPanel.classList.toggle('collapsed');
+        });
+        
+        // 添加折叠指示器
+        const collapseIndicator = document.createElement('span');
+        collapseIndicator.className = 'collapse-indicator';
+        collapseIndicator.textContent = '▼';
+        header.appendChild(collapseIndicator);
+        
+        // 3秒后自动折叠
+        setTimeout(() => {
+            if (executionPanel.parentNode) {
+                executionPanel.classList.add('collapsed');
+            }
+        }, 3000);
+    }
+    
+    /**
+     * 获取操作描述
+     */
+    getActionDescription(action) {
+        switch (action.type) {
+            case 'create':
+                return `创建文件: ${action.data.filePath}`;
+            case 'edit':
+                return `编辑文件: ${action.data.filePath}`;
+            case 'delete':
+                return `删除文件: ${action.data.filePath}`;
+            case 'move':
+                return `移动文件: ${action.data.sourcePath} → ${action.data.destinationPath}`;
+            case 'search':
+                return `搜索: ${action.data.query} (在 ${action.data.filePath})`;
+            case 'compile':
+                return `编译: ${action.data.filePath}`;
+            case 'terminal':
+                return `执行命令: ${action.data.command}`;
+            case 'ui':
+                return `UI操作: ${action.data.action}`;
+            default:
+                return `执行操作: ${action.type}`;
         }
     }
     
