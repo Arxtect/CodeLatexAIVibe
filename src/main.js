@@ -100,15 +100,13 @@ async function initIDE() {
         //     }
         // }, 500);
         
-        console.log('LaTeX IDE 初始化完成');
+        // 初始化 Agent 系统
+        await initAgents();
         
         // 初始化右键菜单
         initContextMenu();
         
-        // 初始化 Agent 系统
-        setTimeout(async () => {
-            await initAgents();
-        }, 1000);
+        console.log('LaTeX IDE 初始化完成');
     } catch (error) {
         console.error('IDE 初始化失败:', error);
     }
@@ -265,13 +263,24 @@ window.confirmNewFolder = async () => {
 };
 
 window.deleteFile = () => {
-    // TODO: 实现删除文件功能
-    console.log('删除文件功能待实现');
+    if (currentContextTarget && currentContextTarget.path) {
+        if (confirm(`确定要删除 "${currentContextTarget.path}" 吗？`)) {
+            // TODO: 实现文件删除功能
+            console.log('删除文件:', currentContextTarget.path);
+        }
+    }
+    hideContextMenu();
 };
 
 window.renameFile = () => {
-    // TODO: 实现重命名文件功能
-    console.log('重命名文件功能待实现');
+    if (currentContextTarget && currentContextTarget.path) {
+        const newName = prompt('请输入新名称:', currentContextTarget.path);
+        if (newName && newName !== currentContextTarget.path) {
+            // TODO: 实现文件重命名功能
+            console.log('重命名文件:', currentContextTarget.path, '->', newName);
+        }
+    }
+    hideContextMenu();
 };
 
 // 设置相关的全局函数
@@ -380,6 +389,23 @@ function initContextMenu() {
     
     // 监听右键事件
     document.addEventListener('contextmenu', (e) => {
+        // 检查是否在文件tab上
+        const fileTab = e.target.closest('.tab');
+        if (fileTab) {
+            e.preventDefault();
+            const filePath = fileTab.dataset.file;
+            if (filePath) {
+                currentContextTarget = {
+                    type: 'file-tab',
+                    element: fileTab,
+                    path: filePath,
+                    isFolder: false
+                };
+                showFileTabContextMenu(e.clientX, e.clientY);
+                return;
+            }
+        }
+        
         // 检查是否在文件管理器区域
         const fileExplorer = document.getElementById('fileExplorer');
         const editorContainer = document.querySelector('.monaco-editor');
@@ -419,6 +445,20 @@ function initContextMenu() {
             hideContextMenu();
         }
     });
+}
+
+function showFileTabContextMenu(x, y) {
+    const contextMenu = document.getElementById('contextMenu');
+    
+    // 显示文件tab相关的菜单项
+    document.getElementById('addSelectionItem').style.display = 'none';
+    document.getElementById('addFileItem').style.display = 'none';
+    document.getElementById('addContextFileItem').style.display = 'block';
+    document.getElementById('addContextFolderItem').style.display = 'none';
+    document.getElementById('deleteItem').style.display = 'none';
+    document.getElementById('renameItem').style.display = 'none';
+    
+    showContextMenu(x, y);
 }
 
 function showFileContextMenu(x, y) {
@@ -484,7 +524,9 @@ function hideContextMenu() {
 
 // 添加右键菜单相关的全局函数
 window.addContextMenuFileToContext = () => {
-    if (currentContextTarget && currentContextTarget.type === 'file-item' && !currentContextTarget.isFolder) {
+    if (currentContextTarget && 
+        ((currentContextTarget.type === 'file-item' && !currentContextTarget.isFolder) ||
+         currentContextTarget.type === 'file-tab')) {
         if (window.agentPanel) {
             window.agentPanel.addFileToContextByPath(currentContextTarget.path);
         }
@@ -497,6 +539,22 @@ window.addContextMenuFolderToContext = () => {
         if (window.agentPanel) {
             window.agentPanel.addFolderToContextByPath(currentContextTarget.path);
         }
+    }
+    hideContextMenu();
+};
+
+// 添加选中文本到上下文
+window.addSelectionToContext = () => {
+    if (window.agentPanel) {
+        window.agentPanel.addSelectionToContext();
+    }
+    hideContextMenu();
+};
+
+// 添加当前文件到上下文
+window.addCurrentFileToContext = () => {
+    if (window.agentPanel) {
+        window.agentPanel.addCurrentFileToContext();
     }
     hideContextMenu();
 }; 

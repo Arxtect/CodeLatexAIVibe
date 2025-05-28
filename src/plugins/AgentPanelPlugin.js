@@ -96,9 +96,7 @@ export class AgentPanelPlugin {
                         <div class="context-header">
                             <span class="context-title">📎 上下文</span>
                             <div class="context-controls">
-                                <button class="btn-context" id="add-selection-btn" title="添加选中内容">📝 选中</button>
-                                <button class="btn-context" id="add-file-folder-btn" title="添加文件/文件夹">📁 文件</button>
-                                <button class="btn-context" id="clear-context-btn" title="清空上下文">🗑️</button>
+                                <button class="btn-context" id="clear-context-btn" title="清空上下文">🗑️ 清空</button>
                             </div>
                         </div>
                         <div class="context-items" id="context-items">
@@ -742,14 +740,6 @@ export class AgentPanelPlugin {
         });
         
         // 上下文管理按钮
-        this.panel.querySelector('#add-selection-btn').addEventListener('click', () => {
-            this.addSelectionToContext();
-        });
-        
-        this.panel.querySelector('#add-file-folder-btn').addEventListener('click', () => {
-            this.showFileSelector();
-        });
-        
         this.panel.querySelector('#clear-context-btn').addEventListener('click', () => {
             this.clearContext();
         });
@@ -1364,15 +1354,6 @@ export class AgentPanelPlugin {
      */
     async showFileSelector() {
         try {
-            // 如果有当前文件，优先添加当前文件
-            if (window.ide && window.ide.currentFile) {
-                const addCurrentFile = confirm('是否添加当前打开的文件到上下文？\n\n点击"确定"添加当前文件，点击"取消"选择其他文件/文件夹。');
-                if (addCurrentFile) {
-                    await this.addCurrentFileToContext();
-                    return;
-                }
-            }
-            
             const files = await this.getProjectFiles();
             
             if (files.length === 0) {

@@ -1331,19 +1331,30 @@
     </div>
     
     <!-- 右键菜单 -->
-    <div class="context-menu" id="contextMenu">
-        <div class="context-menu-item" onclick="createNewFile()">📄 新建文件</div>
-        <div class="context-menu-item" onclick="createNewFolder()">📁 新建文件夹</div>
+    <div id="contextMenu" class="context-menu hidden">
+        <div class="context-menu-item" id="addSelectionItem" onclick="addSelectionToContext()">
+            📝 添加选中文本到上下文
+        </div>
+        <div class="context-menu-item" id="addFileItem" onclick="addCurrentFileToContext()">
+            📄 添加当前文件到上下文
+        </div>
+        <div class="context-menu-item" id="addContextFileItem" onclick="addContextMenuFileToContext()">
+            📄 添加文件到上下文
+        </div>
+        <div class="context-menu-item" id="addContextFolderItem" onclick="addContextMenuFolderToContext()">
+            📁 添加文件夹到上下文
+        </div>
         <div class="context-menu-separator"></div>
-        <div class="context-menu-item" onclick="addSelectionToContext()" id="addSelectionItem">📝 添加选中文本到上下文</div>
-        <div class="context-menu-item" onclick="addCurrentFileToContext()" id="addFileItem">📄 添加当前文件到上下文</div>
-        <div class="context-menu-item" onclick="addContextMenuFileToContext()" id="addContextFileItem" style="display: none;">📄 添加此文件到上下文</div>
-        <div class="context-menu-item" onclick="addContextMenuFolderToContext()" id="addContextFolderItem" style="display: none;">📁 添加此文件夹到上下文</div>
+        <div class="context-menu-item" id="deleteItem" onclick="deleteFile()">
+            🗑️ 删除
+        </div>
+        <div class="context-menu-item" id="renameItem" onclick="renameFile()">
+            ✏️ 重命名
+        </div>
         <div class="context-menu-separator"></div>
-        <div class="context-menu-item" onclick="showAgentPanel()">🤖 打开 AI 助手</div>
-        <div class="context-menu-separator"></div>
-        <div class="context-menu-item" onclick="deleteFile()" id="deleteItem" style="display: none;">🗑️ 删除</div>
-        <div class="context-menu-item" onclick="renameFile()" id="renameItem" style="display: none;">✏️ 重命名</div>
+        <div class="context-menu-item" onclick="showAgentPanel()">
+            🤖 打开 AI 助手
+        </div>
     </div>
     
     <!-- 新建文件模态框 -->
@@ -1548,20 +1559,6 @@
                     </div>
                 </div>
             </div>
-        </div>
-    </div>
-    
-    <!-- 上下文菜单 -->
-    <div id="context-menu" class="context-menu hidden">
-        <div class="context-menu-item" onclick="addSelectionToContext()">
-            📝 添加选中文本到上下文
-        </div>
-        <div class="context-menu-item" onclick="addCurrentFileToContext()">
-            📄 添加当前文件到上下文
-        </div>
-        <div class="context-menu-separator"></div>
-        <div class="context-menu-item" onclick="showAgentPanel()">
-            🤖 打开 AI 助手
         </div>
     </div>
     
