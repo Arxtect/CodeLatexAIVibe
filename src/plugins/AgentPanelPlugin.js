@@ -84,13 +84,13 @@ export class AgentPanelPlugin {
                                     <li>搜索和导航代码</li>
                                     <li>编译和调试</li>
                                 </ul>
-                            </div>
-                        </div>
+                    </div>
+                </div>
                     </div>
                 </div>
                 
                 <!-- 输入区域 -->
-                <div class="chat-input-container">
+                    <div class="chat-input-container">
                     <!-- 上下文管理区域 -->
                     <div class="context-manager" id="context-manager">
                         <div class="context-header">
@@ -106,12 +106,12 @@ export class AgentPanelPlugin {
                     </div>
                     
                     <div class="chat-input-wrapper">
-                        <textarea 
-                            id="chat-input" 
+                            <textarea 
+                                id="chat-input" 
                             class="chat-input" 
                             placeholder="输入消息... (Shift+Enter 换行，Enter 发送)"
-                            rows="1"
-                        ></textarea>
+                                rows="1"
+                            ></textarea>
                         <div class="chat-input-actions">
                             <button id="chat-new-conversation-btn" class="btn-new-conversation" title="新建对话">
                                 <span class="new-conversation-icon">💬</span>
@@ -121,9 +121,9 @@ export class AgentPanelPlugin {
                             </button>
                             <button id="chat-clear-btn" class="btn-clear" title="清空历史">
                                 <span class="clear-icon">🗑️</span>
-                            </button>
+                                </button>
+                            </div>
                         </div>
-                    </div>
                     <div class="chat-input-footer">
                         <span class="input-hint">Shift+Enter 换行 • Enter 发送</span>
                         <span class="char-count" id="char-count">0</span>
@@ -1035,6 +1035,67 @@ export class AgentPanelPlugin {
                 max-height: 200px;
                 overflow-y: auto;
             }
+            
+            /* 紫色主题样式 - 用于执行任务 */
+            .purple-theme .tool-call-progress-fill {
+                background: linear-gradient(90deg, #8e44ad, #6c3483);
+            }
+            
+            .purple-theme .tool-call-header {
+                background: #f4f1f8;
+                border-bottom-color: #d7bde2;
+            }
+            
+            .purple-theme .tool-call-header:hover {
+                background: #e8daef;
+            }
+            
+            .purple-theme .tool-call-header.completed {
+                background: #e8daef;
+                border-bottom-color: #d7bde2;
+            }
+            
+            .purple-theme .tool-call-step.executing {
+                border-color: #8e44ad;
+                background: #f4f1f8;
+            }
+            
+            .purple-theme .tool-call-step.success {
+                border-color: #8e44ad;
+                background: #e8daef;
+            }
+            
+            .purple-theme .tool-call-step.error {
+                border-color: #dc3545;
+                background: #f8d7da;
+            }
+            
+            /* 执行任务面板样式 */
+            .execution-task-panel {
+                margin: 12px 0;
+                border: 1px solid #d7bde2;
+                border-radius: 8px;
+                background: #ffffff;
+                overflow: hidden;
+                transition: all 0.3s ease;
+            }
+            
+            .execution-task-panel.collapsed .tool-call-content {
+                display: none;
+            }
+            
+            .execution-task-panel .tool-call-header {
+                background: #f4f1f8;
+                border-bottom-color: #d7bde2;
+            }
+            
+            .execution-task-panel .tool-call-header:hover {
+                background: #e8daef;
+            }
+            
+            .execution-task-panel .tool-call-progress-fill {
+                background: linear-gradient(90deg, #8e44ad, #6c3483);
+            }
         `;
         
         document.head.appendChild(styles);
@@ -1046,16 +1107,16 @@ export class AgentPanelPlugin {
     setupEventListeners() {
         // 面板控制按钮
         this.panel.querySelector('#agent-close-btn').addEventListener('click', () => {
-            this.hide();
-        });
+                this.hide();
+            });
         
         this.panel.querySelector('#agent-minimize-btn').addEventListener('click', () => {
             this.toggleMinimize();
-        });
+            });
         
         this.panel.querySelector('#agent-settings-btn').addEventListener('click', () => {
             this.showSettings();
-        });
+            });
         
         // 聊天输入
         const chatInput = this.panel.querySelector('#chat-input');
@@ -1063,21 +1124,21 @@ export class AgentPanelPlugin {
         const clearBtn = this.panel.querySelector('#chat-clear-btn');
         const newConversationBtn = this.panel.querySelector('#chat-new-conversation-btn');
         
-        chatInput.addEventListener('keydown', (e) => {
+            chatInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                this.sendMessage();
-            }
-        });
-        
-        chatInput.addEventListener('input', () => {
-            this.updateCharCount();
+                    e.preventDefault();
+                    this.sendMessage();
+                }
+            });
+            
+            chatInput.addEventListener('input', () => {
+                this.updateCharCount();
             this.autoResize();
         });
         
-        sendBtn.addEventListener('click', () => {
-            this.sendMessage();
-        });
+            sendBtn.addEventListener('click', () => {
+                this.sendMessage();
+            });
         
         clearBtn.addEventListener('click', () => {
             this.clearChat();
@@ -1254,8 +1315,8 @@ export class AgentPanelPlugin {
         const indicator = this.panel.querySelector('#agent-status-indicator');
         const statusText = this.panel.querySelector('#agent-status-text');
         
-        indicator.className = `status-indicator ${status}`;
-        statusText.textContent = text;
+            indicator.className = `status-indicator ${status}`;
+            statusText.textContent = text;
     }
     
     /**
@@ -3333,12 +3394,28 @@ export class AgentPanelPlugin {
         document.head.appendChild(styles);
     }
 
-    showToolCallPanel(toolCalls) {
+    showToolCallPanel(toolCalls, type = 'tool_call') {
         const toolCallId = 'tool_' + Date.now();
+        
+        // 根据类型设置不同的主题
+        const themes = {
+            tool_call: {
+                className: 'tool-call-panel',
+                title: '🔧 工具调用',
+                color: 'blue'
+            },
+            execution: {
+                className: 'execution-task-panel',
+                title: '🚀 执行任务',
+                color: 'purple'
+            }
+        };
+        
+        const theme = themes[type] || themes.tool_call;
         
         // 创建工具调用面板
         const panel = document.createElement('div');
-        panel.className = 'tool-call-panel';
+        panel.className = `${theme.className} ${theme.color}-theme`;
         panel.id = toolCallId;
         
         // 构建步骤HTML
@@ -3353,30 +3430,30 @@ export class AgentPanelPlugin {
             }
             
             return `
-                <div class="tool-call-step" data-step="${index}">
+                        <div class="tool-call-step" data-step="${index}">
                     <div style="display: flex; align-items: center;">
-                        <span class="step-status">⏳</span>
-                        <span class="step-description">${this.getToolCallDescription(toolCall)}</span>
+                            <span class="step-status">⏳</span>
+                            <span class="step-description">${this.getToolCallDescription(toolCall)}</span>
                     </div>
-                    <div class="step-details collapsed">
-                        <div class="step-args">
+                            <div class="step-details collapsed">
+                                <div class="step-args">
                             <strong>函数名:</strong>
                             <pre>${toolCall.function.name}</pre>
-                            <strong>参数:</strong>
+                                    <strong>参数:</strong>
                             <pre>${argsDisplay}</pre>
+                                </div>
+                                <div class="step-result" style="display: none;">
+                                    <strong>结果:</strong>
+                                    <pre class="result-content"></pre>
+                                </div>
+                            </div>
                         </div>
-                        <div class="step-result" style="display: none;">
-                            <strong>结果:</strong>
-                            <pre class="result-content"></pre>
-                        </div>
-                    </div>
-                </div>
             `;
         }).join('');
         
         panel.innerHTML = `
             <div class="tool-call-header" onclick="this.parentElement.classList.toggle('collapsed')">
-                <span class="tool-call-title">🔧 工具调用</span>
+                <span class="tool-call-title">${theme.title}</span>
                 <span class="tool-call-progress">0/${toolCalls.length}</span>
                 <span class="tool-call-toggle">▼</span>
             </div>
@@ -3478,8 +3555,14 @@ export class AgentPanelPlugin {
         const header = panel.querySelector('.tool-call-header');
         const title = panel.querySelector('.tool-call-title');
         
+        // 根据面板类型设置不同的完成标题
+        let completedTitle = '🔧 工具调用完成';
+        if (panel.classList.contains('purple-theme')) {
+            completedTitle = '🚀 执行任务完成';
+        }
+        
         // 更新标题
-        title.textContent = '🔧 工具调用完成';
+        title.textContent = completedTitle;
         header.classList.add('completed');
         
         // 3秒后自动折叠
@@ -3548,6 +3631,19 @@ export class AgentPanelPlugin {
                 return `🔨 编译 LaTeX: ${args.file_path || args.path || '当前文件'}`;
             case 'preview_pdf':
                 return `👁️ 预览 PDF: ${args.file_path || args.path || '当前文件'}`;
+            
+            // 执行任务操作类型
+            case 'create':
+                return `📝 创建文件: ${args.target || args.file_path || '未指定'}`;
+            case 'edit':
+                return `✏️ 编辑文件: ${args.target || args.file_path || '未指定'}`;
+            case 'delete':
+                return `🗑️ 删除文件: ${args.target || args.file_path || '未指定'}`;
+            case 'move':
+                return `📁 移动文件: ${args.source || '未指定'} → ${args.target || '未指定'}`;
+            case 'compile':
+                return `🔨 编译文件: ${args.target || args.file_path || '未指定'}`;
+                
             default:
                 // 对于未知的工具调用，尝试从参数中提取有用信息
                 const paramInfo = Object.keys(args).length > 0 ? 

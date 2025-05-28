@@ -375,10 +375,6 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                 // 调用大语言模型进行决策
                 const decision = await this.makeDecision(message, accumulatedContext, conversationHistory, onStream);
                 
-                if (!decision) {
-                    return this.createResponse('❌ 无法理解您的需求，请重新描述');
-                }
-                
                 // 处理不同类型的决策
                 if (decision.type === 'gather_info') {
                     this.log('info', '执行信息获取阶段');
@@ -676,8 +672,13 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                 return decision;
             }
             
-            this.log('warn', '无法解析决策响应', responseText);
-            return null;
+            this.log('warn', '无法解析决策响应，返回停止任务决策', responseText);
+            // 当无法解析决策响应时，返回停止任务的决策
+            return {
+                type: 'complete_task',
+                message: '❌ 决策响应格式异常，任务已停止\n\n可能的原因：\n• AI 模型返回了非标准格式的响应\n• 网络连接问题导致响应不完整\n• API 配置问题\n\n建议：\n• 检查网络连接\n• 验证 API Key 配置\n• 尝试重新发送请求',
+                reasoning: '决策响应解析失败，为安全起见停止任务'
+            };
             
         } catch (error) {
             this.log('error', '决策分析失败', error);
@@ -795,15 +796,18 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
             return results;
         }
         
-        // 显示执行面板
+        // 显示执行面板（使用紫色主题的工具调用面板）
         let executionId = null;
-        if (window.agentPanel && typeof window.agentPanel.showExecutionPanel === 'function') {
-            const actions = decision.operations.map(op => ({
-                type: op.type,
-                description: op.description,
-                target: op.target
+        if (window.agentPanel && typeof window.agentPanel.showToolCallPanel === 'function') {
+            // 将操作转换为工具调用格式以复用可视化
+            const toolCalls = decision.operations.map((op, index) => ({
+                id: `exec_${Date.now()}_${index}`,
+                function: {
+                    name: op.type,
+                    arguments: JSON.stringify(op.parameters || {})
+                }
             }));
-            executionId = window.agentPanel.showExecutionPanel(actions);
+            executionId = window.agentPanel.showToolCallPanel(toolCalls, 'execution');
         }
         
         // 执行每个操作
@@ -814,8 +818,8 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                 this.log('info', `执行操作 ${i + 1}/${decision.operations.length}: ${operation.type} - ${operation.description}`);
                 
                 // 更新执行状态
-                if (executionId && window.agentPanel && typeof window.agentPanel.updateExecutionStep === 'function') {
-                    window.agentPanel.updateExecutionStep(executionId, i, 'executing', operation.description);
+                if (executionId && window.agentPanel && typeof window.agentPanel.updateToolCallStep === 'function') {
+                    window.agentPanel.updateToolCallStep(executionId, i, 'executing');
                 }
                 
                 // 验证操作是否为写入操作
@@ -832,6 +836,10 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                     results.completedSteps++;
                     
                     // 更新执行状态
+                    if (executionId && window.agentPanel && typeof window.agentPanel.updateToolCallStep === 'function') {
+                        window.agentPanel.updateToolCallStep(executionId, i, 'success', { action: action.type, description: operation.description });
+                    }
+                    
                     if (executionId && window.agentPanel && typeof window.agentPanel.updateExecutionStep === 'function') {
                         window.agentPanel.updateExecutionStep(executionId, i, 'success', operation.description, { action: action.type });
                     }
@@ -851,15 +859,15 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                 });
                 
                 // 更新执行状态
-                if (executionId && window.agentPanel && typeof window.agentPanel.updateExecutionStep === 'function') {
-                    window.agentPanel.updateExecutionStep(executionId, i, 'error', operation.description, { error: error.message });
+                if (executionId && window.agentPanel && typeof window.agentPanel.updateToolCallStep === 'function') {
+                    window.agentPanel.updateToolCallStep(executionId, i, 'error', { error: error.message });
                 }
             }
         }
         
         // 完成执行
-        if (executionId && window.agentPanel && typeof window.agentPanel.completeExecution === 'function') {
-            window.agentPanel.completeExecution(executionId);
+        if (executionId && window.agentPanel && typeof window.agentPanel.completeToolCall === 'function') {
+            window.agentPanel.completeToolCall(executionId);
         }
         
         results.success = results.errors.length === 0;
