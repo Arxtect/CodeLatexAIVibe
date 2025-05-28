@@ -630,55 +630,81 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
             const systemPrompt = this.buildDecisionSystemPrompt();
             const userPrompt = this.buildDecisionUserPrompt(originalMessage, context, conversationHistory);
             
-            const response = await this.callOpenAI([
-                { role: 'system', content: systemPrompt },
-                { role: 'user', content: userPrompt }
-            ], null); // 决策阶段不使用流模式
+            // 临时禁用工具调用，确保AI返回决策JSON格式
+            const originalToolCallManager = this.toolCallManager;
+            this.toolCallManager = null; // 临时禁用工具调用
             
-            // 处理不同类型的响应
-            let responseText = null;
-            
-            if (typeof response === 'string') {
-                // 直接的文本响应
-                responseText = response;
-            } else if (response && typeof response === 'object') {
-                if (response.isToolCallResponse) {
-                    // 工具调用响应，提取内容
-                    if (response.content && typeof response.content === 'string') {
+            try {
+                const response = await this.callOpenAI([
+                    { role: 'system', content: systemPrompt },
+                    { role: 'user', content: userPrompt }
+                ], null); // 决策阶段不使用流模式
+                
+                // 恢复工具调用管理器
+                this.toolCallManager = originalToolCallManager;
+                
+                // 处理不同类型的响应
+                let responseText = null;
+                
+                if (typeof response === 'string') {
+                    // 直接的文本响应
+                    responseText = response;
+                } else if (response && typeof response === 'object') {
+                    if (response.isToolCallResponse) {
+                        // 工具调用响应，提取内容
+                        if (response.content && typeof response.content === 'string') {
+                            responseText = response.content;
+                        } else if (response.content && response.content.content) {
+                            responseText = response.content.content;
+                        } else {
+                            this.log('warn', '工具调用响应格式异常', response);
+                            return {
+                                type: 'complete_task',
+                                message: '❌ 决策响应格式异常，任务已停止',
+                                reasoning: '工具调用响应格式异常'
+                            };
+                        }
+                    } else if (response.content) {
+                        // 普通对象响应
                         responseText = response.content;
-                    } else if (response.content && response.content.content) {
-                        responseText = response.content.content;
                     } else {
-                        this.log('warn', '工具调用响应格式异常', response);
-                        return null;
+                        this.log('warn', '响应对象格式异常', response);
+                        return {
+                            type: 'complete_task',
+                            message: '❌ 决策响应格式异常，任务已停止',
+                            reasoning: '响应对象格式异常'
+                        };
                     }
-                } else if (response.content) {
-                    // 普通对象响应
-                    responseText = response.content;
                 } else {
-                    this.log('warn', '响应对象格式异常', response);
-                    return null;
+                    this.log('warn', '响应格式异常', response);
+                    return {
+                        type: 'complete_task',
+                        message: '❌ 决策响应格式异常，任务已停止',
+                        reasoning: '响应格式异常'
+                    };
                 }
-            } else {
-                this.log('warn', '响应格式异常', response);
-                return null;
+                
+                // 解析决策响应
+                const decision = this.parseDecisionResponse(responseText);
+                
+                if (decision) {
+                    this.log('info', `决策结果: ${decision.type} - ${decision.reasoning || '无说明'}`);
+                    return decision;
+                }
+                
+                this.log('warn', '无法解析决策响应，返回停止任务决策', responseText);
+                // 当无法解析决策响应时，返回停止任务的决策
+                return {
+                    type: 'complete_task',
+                    message: '❌ 决策响应格式异常，任务已停止\n\n可能的原因：\n• AI 模型返回了非标准格式的响应\n• 网络连接问题导致响应不完整\n• API 配置问题\n\n建议：\n• 检查网络连接\n• 验证 API Key 配置\n• 尝试重新发送请求',
+                    reasoning: '决策响应解析失败，为安全起见停止任务'
+                };
+                
+            } catch (error) {
+                // 确保恢复工具调用管理器
+                this.toolCallManager = originalToolCallManager;
+                throw error;
             }
-            
-            // 解析决策响应
-            const decision = this.parseDecisionResponse(responseText);
-            
-            if (decision) {
-                this.log('info', `决策结果: ${decision.type} - ${decision.reasoning || '无说明'}`);
-                return decision;
-            }
-            
-            this.log('warn', '无法解析决策响应，返回停止任务决策', responseText);
-            // 当无法解析决策响应时，返回停止任务的决策
-            return {
-                type: 'complete_task',
-                message: '❌ 决策响应格式异常，任务已停止\n\n可能的原因：\n• AI 模型返回了非标准格式的响应\n• 网络连接问题导致响应不完整\n• API 配置问题\n\n建议：\n• 检查网络连接\n• 验证 API Key 配置\n• 尝试重新发送请求',
-                reasoning: '决策响应解析失败，为安全起见停止任务'
-            };
             
         } catch (error) {
             this.log('error', '决策分析失败', error);
@@ -952,18 +978,111 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
      * 执行单个动作
      */
     async executeAction(action) {
-        // 这里应该调用实际的文件系统操作
-        // 暂时只记录日志
         this.log('info', `执行动作: ${action.type} - ${action.target || action.description}`);
         
-        // TODO: 实现实际的文件操作
-        // 例如：
-        // - 创建文件: await window.ide.fileSystem.writeFile(action.target, action.content)
-        // - 编辑文件: await window.ide.fileSystem.writeFile(action.target, action.content)
-        // - 删除文件: await window.ide.fileSystem.unlink(action.target)
-        // - 移动文件: await window.ide.fileSystem.rename(action.source, action.target)
-        
-        return true;
+        try {
+            switch (action.type) {
+                case 'create':
+                    // 创建文件
+                    await window.ide.fileSystem.writeFile(action.target, action.content || '');
+                    this.log('info', `文件创建成功: ${action.target}`);
+                    
+                    // 更新文件浏览器
+                    if (window.ide.updateFileTree) {
+                        window.ide.updateFileTree();
+                    }
+                    break;
+                    
+                case 'edit':
+                    // 编辑文件
+                    if (action.editType === 'replace') {
+                        await window.ide.fileSystem.writeFile(action.target, action.content || '');
+                    } else if (action.editType === 'insert') {
+                        // 读取现有内容，插入新内容
+                        let existingContent = '';
+                        try {
+                            existingContent = await window.ide.fileSystem.readFile(action.target);
+                        } catch (error) {
+                            // 文件不存在，创建新文件
+                            existingContent = '';
+                        }
+                        
+                        const lines = existingContent.split('\n');
+                        const insertLine = action.startLine || lines.length;
+                        lines.splice(insertLine, 0, action.content || '');
+                        
+                        await window.ide.fileSystem.writeFile(action.target, lines.join('\n'));
+                    } else if (action.editType === 'delete') {
+                        // 删除指定行
+                        const existingContent = await window.ide.fileSystem.readFile(action.target);
+                        const lines = existingContent.split('\n');
+                        const startLine = action.startLine || 0;
+                        const endLine = action.endLine || startLine;
+                        lines.splice(startLine, endLine - startLine + 1);
+                        
+                        await window.ide.fileSystem.writeFile(action.target, lines.join('\n'));
+                    }
+                    this.log('info', `文件编辑成功: ${action.target}`);
+                    
+                    // 如果当前文件正在编辑器中打开，更新编辑器内容
+                    if (window.ide.currentFile === action.target && window.ide.editor) {
+                        const updatedContent = await window.ide.fileSystem.readFile(action.target);
+                        window.ide.editor.setValue(updatedContent);
+                    }
+                    break;
+                    
+                case 'delete':
+                    // 删除文件
+                    await window.ide.fileSystem.unlink(action.target);
+                    this.log('info', `文件删除成功: ${action.target}`);
+                    
+                    // 如果删除的是当前打开的文件，关闭编辑器
+                    if (window.ide.currentFile === action.target) {
+                        window.ide.closeFile(action.target);
+                    }
+                    
+                    // 更新文件浏览器
+                    if (window.ide.updateFileTree) {
+                        window.ide.updateFileTree();
+                    }
+                    break;
+                    
+                case 'move':
+                    // 移动/重命名文件
+                    await window.ide.fileSystem.rename(action.source, action.target);
+                    this.log('info', `文件移动成功: ${action.source} -> ${action.target}`);
+                    
+                    // 如果移动的是当前打开的文件，更新编辑器
+                    if (window.ide.currentFile === action.source) {
+                        window.ide.currentFile = action.target;
+                        // 更新标签页
+                        if (window.ide.updateTabTitle) {
+                            window.ide.updateTabTitle(action.source, action.target);
+                        }
+                    }
+                    
+                    // 更新文件浏览器
+                    if (window.ide.updateFileTree) {
+                        window.ide.updateFileTree();
+                    }
+                    break;
+                    
+                case 'compile':
+                    // 编译 LaTeX 文档
+                    this.log('info', `编译 LaTeX 文档: ${action.target}`);
+                    // 这里可以添加实际的编译逻辑
+                    break;
+                    
+                default:
+                    this.log('warn', `未知的动作类型: ${action.type}`);
+                    break;
+            }
+            
+            return true;
+        } catch (error) {
+            this.log('error', `动作执行失败: ${action.type}`, error);
+            throw error;
+        }
     }
     
     /**
