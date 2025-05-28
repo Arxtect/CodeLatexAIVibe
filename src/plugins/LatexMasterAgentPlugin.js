@@ -418,15 +418,44 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                 { role: 'user', content: userPrompt }
             ], null); // 决策阶段不使用流模式
             
+            // 处理不同类型的响应
+            let responseText = null;
+            
+            if (typeof response === 'string') {
+                // 直接的文本响应
+                responseText = response;
+            } else if (response && typeof response === 'object') {
+                if (response.isToolCallResponse) {
+                    // 工具调用响应，提取内容
+                    if (response.content && typeof response.content === 'string') {
+                        responseText = response.content;
+                    } else if (response.content && response.content.content) {
+                        responseText = response.content.content;
+                    } else {
+                        this.log('warn', '工具调用响应格式异常', response);
+                        return null;
+                    }
+                } else if (response.content) {
+                    // 普通对象响应
+                    responseText = response.content;
+                } else {
+                    this.log('warn', '响应对象格式异常', response);
+                    return null;
+                }
+            } else {
+                this.log('warn', '响应格式异常', response);
+                return null;
+            }
+            
             // 解析决策响应
-            const decision = this.parseDecisionResponse(response);
+            const decision = this.parseDecisionResponse(responseText);
             
             if (decision) {
                 this.log('info', `决策结果: ${decision.type} - ${decision.reasoning || '无说明'}`);
                 return decision;
             }
             
-            this.log('warn', '无法解析决策响应', response);
+            this.log('warn', '无法解析决策响应', responseText);
             return null;
             
         } catch (error) {
