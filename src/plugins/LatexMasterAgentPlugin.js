@@ -994,15 +994,25 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
      * 执行单个动作
      */
     async executeAction(action) {
-        this.log('info', `执行动作: ${action.type} - ${action.target || action.description}`);
+        // 兼容不同的动作格式
+        const target = action.target || action.data?.filePath || action.data?.target;
+        const content = action.content || action.data?.content;
+        const source = action.source || action.data?.source;
+        
+        this.log('info', `执行动作: ${action.type} - ${target || action.description}`);
+        
+        // 验证必要参数
+        if (!target && action.type !== 'ui') {
+            throw new Error(`动作 ${action.type} 缺少目标路径`);
+        }
         
         try {
             switch (action.type) {
                 case 'create':
                     // 创建文件，自动创建所需目录
-                    await this.ensureDirectoryExists(action.target);
-                    await window.ide.fileSystem.writeFile(action.target, action.content || '');
-                    this.log('info', `文件创建成功: ${action.target}`);
+                    await this.ensureDirectoryExists(target);
+                    await window.ide.fileSystem.writeFile(target, content || '');
+                    this.log('info', `文件创建成功: ${target}`);
                     
                     // 更新文件浏览器
                     if (window.ide.updateFileTree) {
@@ -1012,8 +1022,8 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                     
                 case 'mkdir':
                     // 创建目录
-                    await this.ensureDirectoryExists(action.target, true);
-                    this.log('info', `目录创建成功: ${action.target}`);
+                    await this.ensureDirectoryExists(target, true);
+                    this.log('info', `目录创建成功: ${target}`);
                     
                     // 更新文件浏览器
                     if (window.ide.updateFileTree) {
@@ -1023,52 +1033,54 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                     
                 case 'edit':
                     // 编辑文件，如果文件不存在则创建
-                    if (action.editType === 'replace') {
-                        await this.ensureDirectoryExists(action.target);
-                        await window.ide.fileSystem.writeFile(action.target, action.content || '');
-                    } else if (action.editType === 'insert') {
+                    const editType = action.editType || action.data?.editType || 'replace';
+                    
+                    if (editType === 'replace') {
+                        await this.ensureDirectoryExists(target);
+                        await window.ide.fileSystem.writeFile(target, content || '');
+                    } else if (editType === 'insert') {
                         // 读取现有内容，插入新内容
                         let existingContent = '';
                         try {
-                            existingContent = await window.ide.fileSystem.readFile(action.target);
+                            existingContent = await window.ide.fileSystem.readFile(target);
                         } catch (error) {
                             // 文件不存在，创建新文件
-                            await this.ensureDirectoryExists(action.target);
+                            await this.ensureDirectoryExists(target);
                             existingContent = '';
                         }
                         
                         const lines = existingContent.split('\n');
-                        const insertLine = action.startLine || lines.length;
-                        lines.splice(insertLine, 0, action.content || '');
+                        const insertLine = action.startLine || action.data?.startLine || lines.length;
+                        lines.splice(insertLine, 0, content || '');
                         
-                        await window.ide.fileSystem.writeFile(action.target, lines.join('\n'));
-                    } else if (action.editType === 'delete') {
+                        await window.ide.fileSystem.writeFile(target, lines.join('\n'));
+                    } else if (editType === 'delete') {
                         // 删除指定行
-                        const existingContent = await window.ide.fileSystem.readFile(action.target);
+                        const existingContent = await window.ide.fileSystem.readFile(target);
                         const lines = existingContent.split('\n');
-                        const startLine = action.startLine || 0;
-                        const endLine = action.endLine || startLine;
+                        const startLine = action.startLine || action.data?.startLine || 0;
+                        const endLine = action.endLine || action.data?.endLine || startLine;
                         lines.splice(startLine, endLine - startLine + 1);
                         
-                        await window.ide.fileSystem.writeFile(action.target, lines.join('\n'));
+                        await window.ide.fileSystem.writeFile(target, lines.join('\n'));
                     }
-                    this.log('info', `文件编辑成功: ${action.target}`);
+                    this.log('info', `文件编辑成功: ${target}`);
                     
                     // 如果当前文件正在编辑器中打开，更新编辑器内容
-                    if (window.ide.currentFile === action.target && window.ide.editor) {
-                        const updatedContent = await window.ide.fileSystem.readFile(action.target);
+                    if (window.ide.currentFile === target && window.ide.editor) {
+                        const updatedContent = await window.ide.fileSystem.readFile(target);
                         window.ide.editor.setValue(updatedContent);
                     }
                     break;
                     
                 case 'delete':
                     // 删除文件
-                    await window.ide.fileSystem.unlink(action.target);
-                    this.log('info', `文件删除成功: ${action.target}`);
+                    await window.ide.fileSystem.unlink(target);
+                    this.log('info', `文件删除成功: ${target}`);
                     
                     // 如果删除的是当前打开的文件，关闭编辑器
-                    if (window.ide.currentFile === action.target) {
-                        window.ide.closeFile(action.target);
+                    if (window.ide.currentFile === target) {
+                        window.ide.closeFile(target);
                     }
                     
                     // 更新文件浏览器
@@ -1079,8 +1091,8 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                     
                 case 'rmdir':
                     // 删除目录
-                    await window.ide.fileSystem.rmdir(action.target);
-                    this.log('info', `目录删除成功: ${action.target}`);
+                    await window.ide.fileSystem.rmdir(target);
+                    this.log('info', `目录删除成功: ${target}`);
                     
                     // 更新文件浏览器
                     if (window.ide.updateFileTree) {
@@ -1090,16 +1102,16 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                     
                 case 'move':
                     // 移动/重命名文件
-                    await this.ensureDirectoryExists(action.target);
-                    await window.ide.fileSystem.rename(action.source, action.target);
-                    this.log('info', `文件移动成功: ${action.source} -> ${action.target}`);
+                    await this.ensureDirectoryExists(target);
+                    await window.ide.fileSystem.rename(source, target);
+                    this.log('info', `文件移动成功: ${source} -> ${target}`);
                     
                     // 如果移动的是当前打开的文件，更新编辑器
-                    if (window.ide.currentFile === action.source) {
-                        window.ide.currentFile = action.target;
+                    if (window.ide.currentFile === source) {
+                        window.ide.currentFile = target;
                         // 更新标签页
                         if (window.ide.updateTabTitle) {
-                            window.ide.updateTabTitle(action.source, action.target);
+                            window.ide.updateTabTitle(source, target);
                         }
                     }
                     
@@ -1111,8 +1123,16 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                     
                 case 'compile':
                     // 编译 LaTeX 文档
-                    this.log('info', `编译 LaTeX 文档: ${action.target}`);
+                    this.log('info', `编译 LaTeX 文档: ${target}`);
                     // 这里可以添加实际的编译逻辑
+                    break;
+                    
+                case 'ui':
+                    // UI 操作
+                    const uiAction = action.action || action.data?.action;
+                    const params = action.params || action.data?.params;
+                    this.log('info', `执行 UI 操作: ${uiAction}`, params);
+                    // 这里可以添加 UI 操作逻辑
                     break;
                     
                 default:
@@ -1131,6 +1151,12 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
      * 确保目录存在，如果不存在则创建
      */
     async ensureDirectoryExists(filePath, isDirectory = false) {
+        // 验证输入参数
+        if (!filePath || typeof filePath !== 'string') {
+            this.log('warn', `ensureDirectoryExists: 无效的文件路径: ${filePath}`);
+            return;
+        }
+        
         try {
             let dirPath;
             if (isDirectory) {
