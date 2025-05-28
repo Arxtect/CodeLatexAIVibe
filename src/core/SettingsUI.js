@@ -68,6 +68,9 @@ export class SettingsUI {
             case 'versions':
                 this.loadVersionSettings();
                 break;
+            case 'performance':
+                this.loadPerformanceSettings();
+                break;
         }
     }
 
@@ -631,5 +634,329 @@ export class SettingsUI {
 
     close() {
         document.getElementById('settingsModal').style.display = 'none';
+    }
+
+    createTabs() {
+        return `
+            <div class="settings-tabs">
+                <button class="settings-tab active" data-tab="editor">编辑器</button>
+                <button class="settings-tab" data-tab="ui">界面</button>
+                <button class="settings-tab" data-tab="performance">性能</button>
+                <button class="settings-tab" data-tab="shortcuts">快捷键</button>
+                <button class="settings-tab" data-tab="plugins">插件</button>
+            </div>
+        `;
+    }
+
+    createPerformanceContent() {
+        const settings = this.settingsManager.get('performance');
+        
+        return `
+            <div class="settings-section">
+                <h3>📊 文件大小阈值</h3>
+                <div class="settings-group">
+                    <label>
+                        <span>性能优化警告阈值 (KB)</span>
+                        <input type="number" 
+                               id="warningFileSize" 
+                               value="${Math.round(settings.warningFileSize / 1024)}" 
+                               min="100" 
+                               max="10240"
+                               title="超过此大小的文件将触发性能优化模式">
+                        <small>超过此大小的文件将自动优化编辑器设置</small>
+                    </label>
+                    
+                    <label>
+                        <span>最大文件大小 (KB)</span>
+                        <input type="number" 
+                               id="maxFileSize" 
+                               value="${Math.round(settings.maxFileSize / 1024)}" 
+                               min="500" 
+                               max="51200"
+                               title="超过此大小的文件将显示警告">
+                        <small>超过此大小的文件打开时会显示警告</small>
+                    </label>
+                    
+                    <label>
+                        <span>上下文文件限制 (KB)</span>
+                        <input type="number" 
+                               id="contextFileLimit" 
+                               value="${Math.round(settings.contextFileLimit / 1024)}" 
+                               min="100" 
+                               max="10240"
+                               title="添加到AI上下文的文件大小限制">
+                        <small>添加到AI上下文的文件大小限制</small>
+                    </label>
+                </div>
+            </div>
+            
+            <div class="settings-section">
+                <h3>📝 内容显示设置</h3>
+                <div class="settings-group">
+                    <label>
+                        <span>预览长度 (字符)</span>
+                        <input type="number" 
+                               id="previewLength" 
+                               value="${settings.previewLength}" 
+                               min="500" 
+                               max="10000"
+                               title="文件预览显示的最大字符数">
+                        <small>文件预览显示的最大字符数</small>
+                    </label>
+                    
+                    <label>
+                        <span>分段加载大小 (字符)</span>
+                        <input type="number" 
+                               id="chunkSize" 
+                               value="${settings.chunkSize}" 
+                               min="1000" 
+                               max="20000"
+                               title="大文件分段加载时每段的大小">
+                        <small>大文件分段加载时每段的大小</small>
+                    </label>
+                    
+                    <label>
+                        <span>每个文件最大段数</span>
+                        <input type="number" 
+                               id="maxChunksPerFile" 
+                               value="${settings.maxChunksPerFile}" 
+                               min="3" 
+                               max="50"
+                               title="单个文件最多可以加载的段数">
+                        <small>单个文件最多可以加载的段数</small>
+                    </label>
+                </div>
+            </div>
+            
+            <div class="settings-section">
+                <h3>🤖 AI 上下文设置</h3>
+                <div class="settings-group">
+                    <label>
+                        <span>最大上下文长度 (字符)</span>
+                        <input type="number" 
+                               id="maxContextLength" 
+                               value="${settings.maxContextLength}" 
+                               min="2000" 
+                               max="32000"
+                               title="发送给AI的总上下文最大长度">
+                        <small>发送给AI的总上下文最大长度</small>
+                    </label>
+                    
+                    <label>
+                        <span>单个项目最大长度 (字符)</span>
+                        <input type="number" 
+                               id="maxItemLength" 
+                               value="${settings.maxItemLength}" 
+                               min="500" 
+                               max="10000"
+                               title="单个上下文项目的最大长度">
+                        <small>单个上下文项目的最大长度</small>
+                    </label>
+                </div>
+            </div>
+            
+            <div class="settings-section">
+                <h3>⚡ 分段加载设置</h3>
+                <div class="settings-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" 
+                               id="enableChunkedLoading" 
+                               ${settings.enableChunkedLoading ? 'checked' : ''}>
+                        <span>启用分段加载</span>
+                        <small>对大文件启用分段加载功能</small>
+                    </label>
+                    
+                    <label class="checkbox-label">
+                        <input type="checkbox" 
+                               id="autoLoadChunks" 
+                               ${settings.autoLoadChunks ? 'checked' : ''}>
+                        <span>自动加载下一段</span>
+                        <small>滚动到底部时自动加载下一段内容</small>
+                    </label>
+                </div>
+            </div>
+            
+            <div class="settings-section">
+                <h3>🎛️ 编辑器优化</h3>
+                <div class="settings-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" 
+                               id="disableMinimapForLargeFiles" 
+                               ${settings.disableMinimapForLargeFiles ? 'checked' : ''}>
+                        <span>大文件禁用小地图</span>
+                        <small>大文件时自动禁用编辑器小地图以提升性能</small>
+                    </label>
+                    
+                    <label class="checkbox-label">
+                        <input type="checkbox" 
+                               id="disableFoldingForLargeFiles" 
+                               ${settings.disableFoldingForLargeFiles ? 'checked' : ''}>
+                        <span>大文件禁用代码折叠</span>
+                        <small>大文件时自动禁用代码折叠功能</small>
+                    </label>
+                    
+                    <label class="checkbox-label">
+                        <input type="checkbox" 
+                               id="disableWordWrapForLargeFiles" 
+                               ${settings.disableWordWrapForLargeFiles ? 'checked' : ''}>
+                        <span>大文件禁用自动换行</span>
+                        <small>大文件时自动禁用自动换行功能</small>
+                    </label>
+                </div>
+            </div>
+            
+            <div class="settings-actions">
+                <button type="button" onclick="window.settingsUI.savePerformanceSettings()" class="btn-primary">
+                    💾 保存设置
+                </button>
+                <button type="button" onclick="window.settingsUI.resetPerformanceSettings()" class="btn-secondary">
+                    🔄 重置为默认值
+                </button>
+                <button type="button" onclick="window.settingsUI.testPerformanceSettings()" class="btn-secondary">
+                    🧪 测试设置
+                </button>
+            </div>
+        `;
+    }
+
+    savePerformanceSettings() {
+        const settings = {
+            warningFileSize: parseInt(document.getElementById('warningFileSize').value) * 1024,
+            maxFileSize: parseInt(document.getElementById('maxFileSize').value) * 1024,
+            contextFileLimit: parseInt(document.getElementById('contextFileLimit').value) * 1024,
+            previewLength: parseInt(document.getElementById('previewLength').value),
+            chunkSize: parseInt(document.getElementById('chunkSize').value),
+            maxChunksPerFile: parseInt(document.getElementById('maxChunksPerFile').value),
+            maxContextLength: parseInt(document.getElementById('maxContextLength').value),
+            maxItemLength: parseInt(document.getElementById('maxItemLength').value),
+            enableChunkedLoading: document.getElementById('enableChunkedLoading').checked,
+            autoLoadChunks: document.getElementById('autoLoadChunks').checked,
+            disableMinimapForLargeFiles: document.getElementById('disableMinimapForLargeFiles').checked,
+            disableFoldingForLargeFiles: document.getElementById('disableFoldingForLargeFiles').checked,
+            disableWordWrapForLargeFiles: document.getElementById('disableWordWrapForLargeFiles').checked
+        };
+        
+        this.settingsManager.set('performance', settings);
+        this.showNotification('性能设置已保存', 'success');
+    }
+    
+    resetPerformanceSettings() {
+        if (confirm('确定要重置所有性能设置为默认值吗？')) {
+            const defaultSettings = this.settingsManager.getDefaultSettings().performance;
+            this.settingsManager.set('performance', defaultSettings);
+            
+            // 重新加载性能设置界面
+            const content = document.querySelector('.settings-content');
+            content.innerHTML = this.createPerformanceContent();
+            this.setupPerformanceEventListeners();
+            
+            this.showNotification('性能设置已重置为默认值', 'success');
+        }
+    }
+    
+    testPerformanceSettings() {
+        const settings = this.settingsManager.get('performance');
+        
+        let testResults = [];
+        
+        // 验证设置的合理性
+        if (settings.warningFileSize >= settings.maxFileSize) {
+            testResults.push('❌ 警告阈值不应大于或等于最大文件大小');
+        }
+        
+        if (settings.previewLength > settings.chunkSize) {
+            testResults.push('⚠️ 预览长度大于分段大小，可能影响分段加载效果');
+        }
+        
+        if (settings.maxItemLength > settings.maxContextLength / 2) {
+            testResults.push('⚠️ 单个项目长度过大，可能导致上下文容量不足');
+        }
+        
+        if (settings.chunkSize < 1000) {
+            testResults.push('⚠️ 分段大小过小，可能导致频繁加载');
+        }
+        
+        if (settings.maxChunksPerFile < 3) {
+            testResults.push('⚠️ 最大段数过少，可能无法完整显示大文件');
+        }
+        
+        // 显示测试结果
+        if (testResults.length === 0) {
+            testResults.push('✅ 所有设置都合理');
+        }
+        
+        const resultText = testResults.join('\n');
+        alert(`性能设置测试结果：\n\n${resultText}`);
+    }
+    
+    setupPerformanceEventListeners() {
+        // 为性能设置添加实时验证
+        const numberInputs = ['warningFileSize', 'maxFileSize', 'contextFileLimit', 
+                             'previewLength', 'chunkSize', 'maxChunksPerFile', 
+                             'maxContextLength', 'maxItemLength'];
+        
+        numberInputs.forEach(id => {
+            const input = document.getElementById(id);
+            if (input) {
+                input.addEventListener('change', () => {
+                    this.validatePerformanceInput(id, input);
+                });
+            }
+        });
+        
+        // 保存按钮事件
+        const saveBtn = document.querySelector('.settings-actions .btn-primary');
+        if (saveBtn && saveBtn.textContent.includes('测试')) {
+            // 如果是测试按钮，不需要添加保存事件
+        }
+    }
+    
+    validatePerformanceInput(inputId, input) {
+        const value = parseInt(input.value);
+        let isValid = true;
+        let message = '';
+        
+        switch (inputId) {
+            case 'warningFileSize':
+                if (value < 100 || value > 10240) {
+                    isValid = false;
+                    message = '警告阈值应在 100KB - 10MB 之间';
+                }
+                break;
+            case 'maxFileSize':
+                if (value < 500 || value > 51200) {
+                    isValid = false;
+                    message = '最大文件大小应在 500KB - 50MB 之间';
+                }
+                break;
+            case 'previewLength':
+                if (value < 500 || value > 10000) {
+                    isValid = false;
+                    message = '预览长度应在 500 - 10000 字符之间';
+                }
+                break;
+            case 'chunkSize':
+                if (value < 1000 || value > 20000) {
+                    isValid = false;
+                    message = '分段大小应在 1000 - 20000 字符之间';
+                }
+                break;
+        }
+        
+        if (!isValid) {
+            input.style.borderColor = '#ff6b6b';
+            input.title = message;
+        } else {
+            input.style.borderColor = '';
+            input.title = '';
+        }
+        
+        return isValid;
+    }
+
+    loadPerformanceSettings() {
+        const content = document.querySelector('.settings-content');
+        content.innerHTML = this.createPerformanceContent();
+        this.setupPerformanceEventListeners();
     }
 } 

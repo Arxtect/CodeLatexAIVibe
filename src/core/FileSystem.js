@@ -180,8 +180,34 @@ export class FileSystem {
     }
 
     // 获取文件树结构
-    async getFileTree(dirPath = '/') {
+    async getFileTree(dirPath = '/', visitedPaths = new Set(), currentDepth = 0, maxDepth = 10) {
         this.ensureInitialized();
+        
+        // 防止无限递归
+        if (currentDepth >= maxDepth) {
+            console.warn(`达到最大扫描深度 ${maxDepth}，停止扫描: ${dirPath}`);
+            return {
+                name: dirPath === '/' ? 'root' : dirPath.split('/').pop(),
+                path: dirPath,
+                type: 'directory',
+                children: [],
+                warning: '目录层级过深，已停止扫描'
+            };
+        }
+        
+        // 防止循环引用
+        const normalizedPath = dirPath.replace(/\/+/g, '/');
+        if (visitedPaths.has(normalizedPath)) {
+            console.warn(`检测到循环引用，跳过: ${dirPath}`);
+            return {
+                name: dirPath === '/' ? 'root' : dirPath.split('/').pop(),
+                path: dirPath,
+                type: 'directory',
+                children: [],
+                warning: '检测到循环引用'
+            };
+        }
+        visitedPaths.add(normalizedPath);
         
         const tree = {
             name: dirPath === '/' ? 'root' : dirPath.split('/').pop(),
@@ -194,23 +220,37 @@ export class FileSystem {
             const files = await this.readdir(dirPath);
             
             for (const file of files) {
-                const fullPath = dirPath === '/' ? `/${file}` : `${dirPath}/${file}`;
-                const stats = await this.stat(fullPath);
+                // 跳过隐藏文件和特殊目录
+                if (file.startsWith('.') || file === 'node_modules' || file === '__pycache__') {
+                    continue;
+                }
                 
-                if (stats.isDirectory()) {
-                    const subTree = await this.getFileTree(fullPath);
-                    tree.children.push(subTree);
-                } else {
-                    tree.children.push({
-                        name: file,
-                        path: fullPath,
-                        type: 'file',
-                        size: stats.size
-                    });
+                const fullPath = dirPath === '/' ? `/${file}` : `${dirPath}/${file}`;
+                
+                try {
+                    const stats = await this.stat(fullPath);
+                    
+                    if (stats.isDirectory()) {
+                        const subTree = await this.getFileTree(fullPath, visitedPaths, currentDepth + 1, maxDepth);
+                        tree.children.push(subTree);
+                    } else {
+                        tree.children.push({
+                            name: file,
+                            path: fullPath,
+                            type: 'file',
+                            size: stats.size
+                        });
+                    }
+                } catch (statError) {
+                    console.warn(`无法获取 ${fullPath} 的状态:`, statError);
                 }
             }
         } catch (error) {
             console.error('获取文件树失败:', error);
+            tree.error = error.message;
+        } finally {
+            // 扫描完成后从访问集合中移除
+            visitedPaths.delete(normalizedPath);
         }
 
         return tree;
@@ -218,7 +258,7 @@ export class FileSystem {
 
     // 导出文件系统内容为 JSON
     async exportToJSON() {
-        const tree = await this.getFileTree();
+        const tree = await this.getFileTree('/', new Set(), 0, 10);
         const exportData = {
             version: '1.0',
             timestamp: new Date().toISOString(),

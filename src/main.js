@@ -101,6 +101,14 @@ async function initIDE() {
         // }, 500);
         
         console.log('LaTeX IDE 初始化完成');
+        
+        // 初始化右键菜单
+        initContextMenu();
+        
+        // 初始化 Agent 系统
+        setTimeout(async () => {
+            await initAgents();
+        }, 1000);
     } catch (error) {
         console.error('IDE 初始化失败:', error);
     }
@@ -342,39 +350,152 @@ window.hideAgentPanel = () => {
 async function initAgents() {
     try {
         // 动态导入 Agent 插件
-        const { ExampleAgent } = await import('./agents/ExampleAgent.js');
-        const { ClineCompatAgent } = await import('./agents/ClineCompatAgent.js');
-        const { LaTeXAssistantAgent } = await import('./agents/LaTeXAssistantAgent.js');
-        const { LatexMasterAgent } = await import('./agents/LatexMasterAgent.js');
+        const { LatexMasterAgentPlugin } = await import('./plugins/LatexMasterAgentPlugin.js');
+        const { AgentPanelPlugin } = await import('./plugins/AgentPanelPlugin.js');
         
-        // 注册示例 Agent
-        const exampleAgent = new ExampleAgent();
-        window.ide.agentAPI.registerAgent(exampleAgent);
+        // 注册 Agent 面板插件（必须先注册）
+        const agentPanel = new AgentPanelPlugin();
+        window.ide.pluginManager.registerPlugin(agentPanel);
         
-        // 注册 Cline 兼容 Agent
-        const clineAgent = new ClineCompatAgent();
-        window.ide.agentAPI.registerAgent(clineAgent);
+        // 注册 LaTeX Master Agent 插件
+        const latexMaster = new LatexMasterAgentPlugin();
+        window.ide.pluginManager.registerPlugin(latexMaster);
         
-        // 注册 LaTeX 智能助手 Agent
-        const latexAssistant = new LaTeXAssistantAgent();
-        window.ide.agentAPI.registerAgent(latexAssistant);
-        
-        // 注册 LaTeX Master Agent (基于 OpenAI)
-        const latexMaster = new LatexMasterAgent();
-        window.ide.agentAPI.registerAgent(latexMaster);
-        
-        console.log('Agent 系统初始化完成');
+        console.log('Agent 插件系统初始化完成');
     } catch (error) {
-        console.error('Agent 系统初始化失败:', error);
+        console.error('Agent 插件系统初始化失败:', error);
     }
 }
 
 // 页面加载完成后初始化
-document.addEventListener('DOMContentLoaded', async () => {
-    await initIDE();
+document.addEventListener('DOMContentLoaded', () => {
+    initIDE();
+});
+
+// 初始化右键菜单
+function initContextMenu() {
+    const contextMenu = document.getElementById('contextMenu');
+    let currentContextTarget = null;
     
-    // 初始化 Agent 系统
-    setTimeout(async () => {
-        await initAgents();
-    }, 1000);
-}); 
+    // 监听右键事件
+    document.addEventListener('contextmenu', (e) => {
+        // 检查是否在文件管理器区域
+        const fileExplorer = document.getElementById('fileExplorer');
+        const editorContainer = document.querySelector('.monaco-editor');
+        
+        if (fileExplorer && fileExplorer.contains(e.target)) {
+            e.preventDefault();
+            
+            // 检查是否点击在文件项上
+            const fileItem = e.target.closest('.file-item');
+            if (fileItem) {
+                currentContextTarget = {
+                    type: 'file-item',
+                    element: fileItem,
+                    path: fileItem.dataset.path,
+                    isFolder: fileItem.classList.contains('folder')
+                };
+                showFileContextMenu(e.clientX, e.clientY);
+            } else {
+                currentContextTarget = { type: 'file-explorer' };
+                showFileExplorerContextMenu(e.clientX, e.clientY);
+            }
+        } else if (editorContainer && editorContainer.contains(e.target)) {
+            e.preventDefault();
+            currentContextTarget = { type: 'editor' };
+            showEditorContextMenu(e.clientX, e.clientY);
+        }
+    });
+    
+    // 点击其他地方隐藏菜单
+    document.addEventListener('click', () => {
+        hideContextMenu();
+    });
+    
+    // 监听键盘事件
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            hideContextMenu();
+        }
+    });
+}
+
+function showFileContextMenu(x, y) {
+    const contextMenu = document.getElementById('contextMenu');
+    
+    // 显示/隐藏相应的菜单项
+    document.getElementById('addSelectionItem').style.display = 'none';
+    document.getElementById('addFileItem').style.display = 'none';
+    document.getElementById('addContextFileItem').style.display = currentContextTarget.isFolder ? 'none' : 'block';
+    document.getElementById('addContextFolderItem').style.display = currentContextTarget.isFolder ? 'block' : 'none';
+    document.getElementById('deleteItem').style.display = 'block';
+    document.getElementById('renameItem').style.display = 'block';
+    
+    showContextMenu(x, y);
+}
+
+function showFileExplorerContextMenu(x, y) {
+    const contextMenu = document.getElementById('contextMenu');
+    
+    // 只显示新建相关的菜单项
+    document.getElementById('addSelectionItem').style.display = 'none';
+    document.getElementById('addFileItem').style.display = 'none';
+    document.getElementById('addContextFileItem').style.display = 'none';
+    document.getElementById('addContextFolderItem').style.display = 'none';
+    document.getElementById('deleteItem').style.display = 'none';
+    document.getElementById('renameItem').style.display = 'none';
+    
+    showContextMenu(x, y);
+}
+
+function showEditorContextMenu(x, y) {
+    const contextMenu = document.getElementById('contextMenu');
+    
+    // 显示编辑器相关的菜单项
+    document.getElementById('addSelectionItem').style.display = 'block';
+    document.getElementById('addFileItem').style.display = 'block';
+    document.getElementById('addContextFileItem').style.display = 'none';
+    document.getElementById('addContextFolderItem').style.display = 'none';
+    document.getElementById('deleteItem').style.display = 'none';
+    document.getElementById('renameItem').style.display = 'none';
+    
+    showContextMenu(x, y);
+}
+
+function showContextMenu(x, y) {
+    const contextMenu = document.getElementById('contextMenu');
+    contextMenu.classList.remove('hidden');
+    
+    // 调整位置，确保菜单不会超出屏幕
+    const rect = contextMenu.getBoundingClientRect();
+    const maxX = window.innerWidth - rect.width;
+    const maxY = window.innerHeight - rect.height;
+    
+    contextMenu.style.left = Math.min(x, maxX) + 'px';
+    contextMenu.style.top = Math.min(y, maxY) + 'px';
+}
+
+function hideContextMenu() {
+    const contextMenu = document.getElementById('contextMenu');
+    contextMenu.classList.add('hidden');
+    currentContextTarget = null;
+}
+
+// 添加右键菜单相关的全局函数
+window.addContextMenuFileToContext = () => {
+    if (currentContextTarget && currentContextTarget.type === 'file-item' && !currentContextTarget.isFolder) {
+        if (window.agentPanel) {
+            window.agentPanel.addFileToContextByPath(currentContextTarget.path);
+        }
+    }
+    hideContextMenu();
+};
+
+window.addContextMenuFolderToContext = () => {
+    if (currentContextTarget && currentContextTarget.type === 'file-item' && currentContextTarget.isFolder) {
+        if (window.agentPanel) {
+            window.agentPanel.addFolderToContextByPath(currentContextTarget.path);
+        }
+    }
+    hideContextMenu();
+}; 

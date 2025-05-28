@@ -36,7 +36,31 @@ export class SettingsManager {
                 sidebarWidth: 250,
                 showStatusBar: true,
                 showToolbar: true,
-                compactMode: false
+                compactMode: false,
+                showLineNumbers: true,
+                showMinimap: true
+            },
+            performance: {
+                // 文件大小阈值 (字节)
+                warningFileSize: 500 * 1024,      // 500KB - 性能优化警告
+                maxFileSize: 2 * 1024 * 1024,     // 2MB - 最大文件大小
+                contextFileLimit: 1024 * 1024,    // 1MB - 上下文文件限制
+                
+                // 内容显示阈值 (字符)
+                previewLength: 2000,              // 预览长度
+                chunkSize: 5000,                  // 分段加载大小
+                maxContextLength: 8000,           // API上下文最大长度
+                maxItemLength: 2000,              // 单个项目最大长度
+                
+                // 分段加载设置
+                enableChunkedLoading: true,       // 启用分段加载
+                autoLoadChunks: false,            // 自动加载下一段
+                maxChunksPerFile: 10,             // 每个文件最大段数
+                
+                // 编辑器性能优化
+                disableMinimapForLargeFiles: true,
+                disableFoldingForLargeFiles: true,
+                disableWordWrapForLargeFiles: true
             }
         };
         
@@ -243,7 +267,72 @@ export class SettingsManager {
     }
 
     resetSettings() {
-        localStorage.removeItem('latex-ide-settings');
-        this.loadSettings();
+        this.settings = this.getDefaultSettings();
+        this.saveSettings();
+    }
+
+    getDefaultSettings() {
+        return {
+            shortcuts: {
+                'newFile': 'Ctrl+N',
+                'openFile': 'Ctrl+O',
+                'saveFile': 'Ctrl+S',
+                'closeTab': 'Ctrl+W',
+                'compile': 'F5',
+                'rename': 'F2',
+                'delete': 'Delete',
+                'find': 'Ctrl+F',
+                'replace': 'Ctrl+H',
+                'toggleSidebar': 'Ctrl+B',
+                'commandPalette': 'Ctrl+Shift+P',
+                'toggleVersionSidebar': 'Ctrl+Shift+V',
+                'createSnapshot': 'Ctrl+Shift+S',
+                'toggleAgentPanel': 'Ctrl+Shift+A'
+            },
+            plugins: {
+                enabled: [],
+                disabled: [],
+                config: {}
+            },
+            editor: {
+                fontSize: 14,
+                theme: 'latex-dark',
+                wordWrap: 'on',
+                minimap: true,
+                lineNumbers: true,
+                autoSave: false,
+                autoSaveDelay: 2000
+            },
+            ui: {
+                sidebarWidth: 250,
+                showStatusBar: true,
+                showToolbar: true,
+                compactMode: false,
+                showLineNumbers: true,
+                showMinimap: true
+            },
+            performance: {
+                // 文件大小阈值 (字节)
+                warningFileSize: 500 * 1024,      // 500KB - 性能优化警告
+                maxFileSize: 2 * 1024 * 1024,     // 2MB - 最大文件大小
+                contextFileLimit: 1024 * 1024,    // 1MB - 上下文文件限制
+                
+                // 内容显示阈值 (字符)
+                previewLength: 2000,              // 预览长度
+                chunkSize: 5000,                  // 分段加载大小
+                maxContextLength: 8000,           // API上下文最大长度
+                maxItemLength: 2000,              // 单个项目最大长度
+                
+                // 分段加载设置
+                enableChunkedLoading: true,       // 启用分段加载
+                autoLoadChunks: false,            // 自动加载下一段
+                maxChunksPerFile: 10,             // 每个文件最大段数
+                
+                // 编辑器性能优化
+                disableMinimapForLargeFiles: true,
+                disableFoldingForLargeFiles: true,
+                disableWordWrapForLargeFiles: true
+            }
+        };
     }
 } 

@@ -6,7 +6,6 @@ import { ShortcutManager } from './ShortcutManager.js';
 import { SettingsUI } from './SettingsUI.js';
 import { VersionManager } from './VersionManager.js';
 import { VersionSidebar } from './VersionSidebar.js';
-import { AgentAPI } from './AgentAPI.js';
 
 export class IDE {
     constructor() {
@@ -18,7 +17,6 @@ export class IDE {
         this.settingsUI = null; // 将在 initUI 中初始化
         this.versionManager = new VersionManager();
         this.versionSidebar = null; // 将在 initUI 中初始化
-        this.agentAPI = new AgentAPI(this); // 初始化 Agent API
         this.openTabs = new Map(); // 存储打开的标签页
         this.currentFile = null;
         this.isDirty = false; // 当前文件是否有未保存的更改
@@ -446,7 +444,18 @@ export class IDE {
         }
     }
 
-    async renderFileTree(dirPath, container, level = 0) {
+    async renderFileTree(dirPath, container, level = 0, maxLevel = 15) {
+        // 防止无限递归
+        if (level >= maxLevel) {
+            console.warn(`达到最大渲染深度 ${maxLevel}，停止渲染: ${dirPath}`);
+            const warningItem = document.createElement('div');
+            warningItem.className = 'warning-item';
+            warningItem.style.paddingLeft = `${16 + level * 20}px`;
+            warningItem.innerHTML = '<span style="color: #ff6b6b; font-style: italic;">目录层级过深，已停止展开</span>';
+            container.appendChild(warningItem);
+            return;
+        }
+        
         try {
             // 如果是根目录，清空容器
             if (level === 0) {
@@ -455,8 +464,15 @@ export class IDE {
             
             const files = await this.fileSystem.readdir(dirPath);
             
+            // 过滤隐藏文件和特殊目录
+            const filteredFiles = files.filter(file => 
+                !file.startsWith('.') && 
+                file !== 'node_modules' && 
+                file !== '__pycache__'
+            );
+            
             // 如果文件夹为空，显示提示
-            if (files.length === 0 && level > 0) {
+            if (filteredFiles.length === 0 && level > 0) {
                 const emptyItem = document.createElement('div');
                 emptyItem.className = 'empty-folder';
                 emptyItem.style.paddingLeft = `${16 + level * 20}px`;
@@ -465,90 +481,95 @@ export class IDE {
                 return;
             }
             
-            for (const file of files) {
+            for (const file of filteredFiles) {
                 const fullPath = dirPath === '/' ? `/${file}` : `${dirPath}/${file}`;
-                const stats = await this.fileSystem.stat(fullPath);
                 
-                const fileItem = document.createElement('div');
-                fileItem.className = 'file-item';
-                fileItem.style.paddingLeft = `${16 + level * 20}px`;
-                
-                if (stats.isDirectory()) {
-                    // 文件夹
-                    fileItem.classList.add('folder');
-                    fileItem.dataset.path = fullPath;
-                    fileItem.innerHTML = `
-                        <div class="file-icon folder-icon">📁</div>
-                        <span class="file-name">${file}</span>
-                        <div class="folder-toggle">▶</div>
-                    `;
+                try {
+                    const stats = await this.fileSystem.stat(fullPath);
                     
-                    const folderContent = document.createElement('div');
-                    folderContent.className = 'folder-content collapsed';
+                    const fileItem = document.createElement('div');
+                    fileItem.className = 'file-item';
+                    fileItem.style.paddingLeft = `${16 + level * 20}px`;
                     
-                    fileItem.addEventListener('click', async (e) => {
-                        e.stopPropagation();
-                        const toggle = fileItem.querySelector('.folder-toggle');
-                        const icon = fileItem.querySelector('.folder-icon');
+                    if (stats.isDirectory()) {
+                        // 文件夹
+                        fileItem.classList.add('folder');
+                        fileItem.dataset.path = fullPath;
+                        fileItem.innerHTML = `
+                            <div class="file-icon folder-icon">📁</div>
+                            <span class="file-name">${file}</span>
+                            <div class="folder-toggle">▶</div>
+                        `;
                         
-                        try {
-                            if (folderContent.classList.contains('collapsed')) {
-                                // 展开文件夹
-                                folderContent.classList.remove('collapsed');
-                                folderContent.classList.add('expanded');
-                                toggle.classList.add('expanded');
-                                toggle.textContent = '▼';
-                                icon.textContent = '📂';
-                                
-                                // 如果还没有加载内容，则加载
-                                if (folderContent.children.length === 0) {
-                                    await this.renderFileTree(fullPath, folderContent, level + 1);
+                        const folderContent = document.createElement('div');
+                        folderContent.className = 'folder-content collapsed';
+                        
+                        fileItem.addEventListener('click', async (e) => {
+                            e.stopPropagation();
+                            const toggle = fileItem.querySelector('.folder-toggle');
+                            const icon = fileItem.querySelector('.folder-icon');
+                            
+                            try {
+                                if (folderContent.classList.contains('collapsed')) {
+                                    // 展开文件夹
+                                    folderContent.classList.remove('collapsed');
+                                    folderContent.classList.add('expanded');
+                                    toggle.classList.add('expanded');
+                                    toggle.textContent = '▼';
+                                    icon.textContent = '📂';
+                                    
+                                    // 如果还没有加载内容，则加载
+                                    if (folderContent.children.length === 0) {
+                                        await this.renderFileTree(fullPath, folderContent, level + 1, maxLevel);
+                                    }
+                                } else {
+                                    // 折叠文件夹
+                                    folderContent.classList.remove('expanded');
+                                    folderContent.classList.add('collapsed');
+                                    toggle.classList.remove('expanded');
+                                    toggle.textContent = '▶';
+                                    icon.textContent = '📁';
                                 }
-                            } else {
-                                // 折叠文件夹
+                            } catch (error) {
+                                console.error('文件夹操作失败:', error);
+                                // 重置状态
                                 folderContent.classList.remove('expanded');
                                 folderContent.classList.add('collapsed');
                                 toggle.classList.remove('expanded');
                                 toggle.textContent = '▶';
                                 icon.textContent = '📁';
                             }
-                        } catch (error) {
-                            console.error('文件夹操作失败:', error);
-                            // 重置状态
-                            folderContent.classList.remove('expanded');
-                            folderContent.classList.add('collapsed');
-                            toggle.classList.remove('expanded');
-                            toggle.textContent = '▶';
-                            icon.textContent = '📁';
-                        }
-                    });
-                    
-                    container.appendChild(fileItem);
-                    container.appendChild(folderContent);
-                } else {
-                    // 文件
-                    const fileExtension = file.split('.').pop().toLowerCase();
-                    const fileIcon = this.getFileIcon(fileExtension);
-                    
-                    fileItem.classList.add('file');
-                    fileItem.dataset.path = fullPath;
-                    fileItem.innerHTML = `
-                        <div class="file-icon">${fileIcon}</div>
-                        <span class="file-name">${file}</span>
-                    `;
-                    
-                    fileItem.addEventListener('click', (e) => {
-                        e.stopPropagation();
-                        this.openFile(fullPath);
-                        
-                        // 高亮选中的文件
-                        document.querySelectorAll('.file-item.selected').forEach(item => {
-                            item.classList.remove('selected');
                         });
-                        fileItem.classList.add('selected');
-                    });
-                    
-                    container.appendChild(fileItem);
+                        
+                        container.appendChild(fileItem);
+                        container.appendChild(folderContent);
+                    } else {
+                        // 文件
+                        const fileExtension = file.split('.').pop().toLowerCase();
+                        const fileIcon = this.getFileIcon(fileExtension);
+                        
+                        fileItem.classList.add('file');
+                        fileItem.dataset.path = fullPath;
+                        fileItem.innerHTML = `
+                            <div class="file-icon">${fileIcon}</div>
+                            <span class="file-name">${file}</span>
+                        `;
+                        
+                        fileItem.addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            this.openFile(fullPath);
+                            
+                            // 高亮选中的文件
+                            document.querySelectorAll('.file-item.selected').forEach(item => {
+                                item.classList.remove('selected');
+                            });
+                            fileItem.classList.add('selected');
+                        });
+                        
+                        container.appendChild(fileItem);
+                    }
+                } catch (statError) {
+                    console.warn(`无法获取 ${fullPath} 的状态:`, statError);
                 }
             }
         } catch (error) {
@@ -610,6 +631,32 @@ export class IDE {
                 content = await this.fileSystem.readFile(filePath);
             }
             
+            // 检查文件大小，对大文件进行警告
+            const performanceSettings = this.settingsManager.get('performance') || {};
+            const maxFileSize = performanceSettings.maxFileSize || 2 * 1024 * 1024; // 2MB 默认
+            const warningSize = performanceSettings.warningFileSize || 500 * 1024; // 500KB 默认
+            
+            if (content.length > maxFileSize) {
+                const shouldContinue = confirm(
+                    `文件 "${filePath}" 非常大 (${Math.round(content.length / 1024)}KB)，` +
+                    `超过设置的限制 (${Math.round(maxFileSize / 1024)}KB)。\n\n` +
+                    `可能导致编辑器性能问题。\n\n` +
+                    `建议：\n` +
+                    `• 使用外部编辑器处理大文件\n` +
+                    `• 分割文件为较小的部分\n` +
+                    `• 在设置中调整文件大小限制\n\n` +
+                    `是否仍要打开？`
+                );
+                if (!shouldContinue) {
+                    return;
+                }
+                
+                // 对于超大文件，禁用一些性能消耗较大的功能
+                console.warn(`打开大文件 ${filePath}，将禁用部分功能以提升性能`);
+            } else if (content.length > warningSize) {
+                console.info(`文件 ${filePath} 较大 (${Math.round(content.length / 1024)}KB)，可能影响性能`);
+            }
+            
             // 创建新标签
             this.createTab(filePath);
             
@@ -617,7 +664,8 @@ export class IDE {
             this.openTabs.set(filePath, {
                 content: content,
                 originalContent: content,
-                isDirty: false
+                isDirty: false,
+                isLargeFile: content.length > warningSize
             });
 
             // 切换到新标签
@@ -626,6 +674,47 @@ export class IDE {
             // 根据文件扩展名设置语言
             const language = this.getLanguageFromFileName(filePath);
             monaco.editor.setModelLanguage(this.editor.getModel(), language);
+
+            // 对于大文件，调整编辑器选项以提升性能
+            if (content.length > warningSize) {
+                const optimizationSettings = {
+                    minimap: { enabled: !performanceSettings.disableMinimapForLargeFiles },
+                    folding: !performanceSettings.disableFoldingForLargeFiles,
+                    wordWrap: performanceSettings.disableWordWrapForLargeFiles ? 'off' : 'on',
+                    renderLineHighlight: 'none', // 禁用行高亮
+                    occurrencesHighlight: false, // 禁用出现次数高亮
+                    selectionHighlight: false, // 禁用选择高亮
+                    renderWhitespace: 'none' // 禁用空白字符渲染
+                };
+                
+                this.editor.updateOptions(optimizationSettings);
+                
+                // 显示性能提示
+                const optimizedFeatures = [];
+                if (!optimizationSettings.minimap.enabled) optimizedFeatures.push('小地图');
+                if (!optimizationSettings.folding) optimizedFeatures.push('代码折叠');
+                if (optimizationSettings.wordWrap === 'off') optimizedFeatures.push('自动换行');
+                
+                const statusMessage = optimizedFeatures.length > 0 
+                    ? `大文件模式 - 已禁用: ${optimizedFeatures.join('、')}`
+                    : `大文件模式 - 已优化性能设置`;
+                    
+                document.getElementById('statusText').textContent = statusMessage;
+                setTimeout(() => {
+                    this.updateStatusBar();
+                }, 3000);
+            } else {
+                // 恢复正常设置
+                this.editor.updateOptions({
+                    minimap: { enabled: true },
+                    folding: true,
+                    wordWrap: 'on',
+                    renderLineHighlight: 'line',
+                    occurrencesHighlight: true,
+                    selectionHighlight: true,
+                    renderWhitespace: 'selection'
+                });
+            }
 
             // 先绑定版本管理，然后设置内容
             const binding = this.versionManager.bindFileToEditor(filePath, this.editor);
@@ -653,7 +742,14 @@ export class IDE {
             
         } catch (error) {
             console.error('打开文件失败:', error);
-            alert('打开文件失败: ' + error.message);
+            
+            // 提供更详细的错误信息
+            let errorMessage = '打开文件失败: ' + error.message;
+            if (error.message.includes('out of memory') || error.message.includes('Maximum call stack')) {
+                errorMessage += '\n\n可能原因：文件过大导致内存不足。\n建议：使用外部编辑器处理大文件。';
+            }
+            
+            alert(errorMessage);
         }
     }
 
@@ -956,8 +1052,8 @@ export class IDE {
      * 切换 Agent 面板
      */
     toggleAgentPanel() {
-        if (this.agentAPI) {
-            this.agentAPI.togglePanel();
+        if (window.toggleAgentPanel) {
+            window.toggleAgentPanel();
         }
     }
 
@@ -965,8 +1061,8 @@ export class IDE {
      * 显示 Agent 面板
      */
     showAgentPanel() {
-        if (this.agentAPI) {
-            this.agentAPI.showPanel();
+        if (window.showAgentPanel) {
+            window.showAgentPanel();
         }
     }
 
@@ -974,8 +1070,8 @@ export class IDE {
      * 隐藏 Agent 面板
      */
     hideAgentPanel() {
-        if (this.agentAPI) {
-            this.agentAPI.hidePanel();
+        if (window.hideAgentPanel) {
+            window.hideAgentPanel();
         }
     }
 

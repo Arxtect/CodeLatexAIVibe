@@ -41,8 +41,31 @@
         }
         
         .file-explorer {
-            flex: 1;
+            background: #252526;
+            border-right: 1px solid #3e3e42;
             overflow-y: auto;
+            flex: 1;
+        }
+        
+        .explorer-header {
+            padding: 10px;
+            border-bottom: 1px solid #3e3e42;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-weight: 600;
+            background: #2d2d30;
+            color: #d4d4d4;
+        }
+        
+        #new-file-btn {
+            background: #007acc;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            padding: 4px 8px;
+            cursor: pointer;
+            font-size: 14px;
         }
         
         .file-item {
@@ -54,6 +77,7 @@
             position: relative;
             user-select: none;
             transition: background-color 0.2s ease;
+            color: #d4d4d4;
         }
         
         .file-item:hover {
@@ -255,28 +279,36 @@
         
         .context-menu {
             position: fixed;
-            background: #383838;
-            border: 1px solid #5a5a5a;
+            background: white;
+            border: 1px solid #ccc;
             border-radius: 4px;
-            padding: 4px 0;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
             z-index: 1000;
+            min-width: 200px;
+            font-size: 14px;
+        }
+        
+        .context-menu.hidden {
             display: none;
-            min-width: 150px;
         }
         
         .context-menu-item {
-            padding: 8px 16px;
+            padding: 8px 12px;
             cursor: pointer;
-            font-size: 13px;
+            border-bottom: 1px solid #f0f0f0;
         }
         
         .context-menu-item:hover {
-            background: #094771;
+            background: #f0f0f0;
+        }
+        
+        .context-menu-item:last-child {
+            border-bottom: none;
         }
         
         .context-menu-separator {
             height: 1px;
-            background: #3e3e42;
+            background: #e0e0e0;
             margin: 4px 0;
         }
         
@@ -1258,7 +1290,11 @@
                 文件资源管理器
             </div>
             <div class="file-explorer" id="fileExplorer">
-                <!-- 文件列表将在这里动态生成 -->
+                <div class="explorer-header">
+                    <span>📁 文件浏览器</span>
+                    <button id="new-file-btn" title="新建文件">+</button>
+                </div>
+                <div id="file-tree"></div>
             </div>
         </div>
         
@@ -1296,10 +1332,18 @@
     
     <!-- 右键菜单 -->
     <div class="context-menu" id="contextMenu">
-        <div class="context-menu-item" onclick="createNewFile()">新建文件</div>
-        <div class="context-menu-item" onclick="createNewFolder()">新建文件夹</div>
-        <div class="context-menu-item" onclick="deleteFile()">删除</div>
-        <div class="context-menu-item" onclick="renameFile()">重命名</div>
+        <div class="context-menu-item" onclick="createNewFile()">📄 新建文件</div>
+        <div class="context-menu-item" onclick="createNewFolder()">📁 新建文件夹</div>
+        <div class="context-menu-separator"></div>
+        <div class="context-menu-item" onclick="addSelectionToContext()" id="addSelectionItem">📝 添加选中文本到上下文</div>
+        <div class="context-menu-item" onclick="addCurrentFileToContext()" id="addFileItem">📄 添加当前文件到上下文</div>
+        <div class="context-menu-item" onclick="addContextMenuFileToContext()" id="addContextFileItem" style="display: none;">📄 添加此文件到上下文</div>
+        <div class="context-menu-item" onclick="addContextMenuFolderToContext()" id="addContextFolderItem" style="display: none;">📁 添加此文件夹到上下文</div>
+        <div class="context-menu-separator"></div>
+        <div class="context-menu-item" onclick="showAgentPanel()">🤖 打开 AI 助手</div>
+        <div class="context-menu-separator"></div>
+        <div class="context-menu-item" onclick="deleteFile()" id="deleteItem" style="display: none;">🗑️ 删除</div>
+        <div class="context-menu-item" onclick="renameFile()" id="renameItem" style="display: none;">✏️ 重命名</div>
     </div>
     
     <!-- 新建文件模态框 -->
@@ -1497,6 +1541,20 @@
                     </div>
                 </div>
             </div>
+        </div>
+    </div>
+    
+    <!-- 上下文菜单 -->
+    <div id="context-menu" class="context-menu hidden">
+        <div class="context-menu-item" onclick="addSelectionToContext()">
+            📝 添加选中文本到上下文
+        </div>
+        <div class="context-menu-item" onclick="addCurrentFileToContext()">
+            📄 添加当前文件到上下文
+        </div>
+        <div class="context-menu-separator"></div>
+        <div class="context-menu-item" onclick="showAgentPanel()">
+            🤖 打开 AI 助手
         </div>
     </div>
     
