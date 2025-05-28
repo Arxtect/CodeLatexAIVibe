@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>按钮测试</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        button { margin: 10px; padding: 10px 20px; }
+        button:disabled { background: #ccc; color: #666; cursor: not-allowed; }
+        .log { background: #f0f0f0; padding: 10px; margin: 10px 0; height: 200px; overflow-y: auto; }
+    </style>
+</head>
+<body>
+    <h1>Undo/Redo 按钮测试</h1>
+    
+    <div>
+        <button id="undoBtn" onclick="testUndo()">↶ 撤销</button>
+        <button id="redoBtn" onclick="testRedo()">↷ 重做</button>
+        <button onclick="enableButtons()">启用按钮</button>
+        <button onclick="disableButtons()">禁用按钮</button>
+        <button onclick="clearLog()">清空日志</button>
+    </div>
+    
+    <div class="log" id="log"></div>
+    
+    <script>
+        function log(message) {
+            const logDiv = document.getElementById('log');
+            logDiv.innerHTML += new Date().toLocaleTimeString() + ': ' + message + '<br>';
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+        
+        function testUndo() {
+            log('撤销按钮被点击');
+            if (window.undo) {
+                const result = window.undo();
+                log('window.undo() 结果: ' + result);
+            } else {
+                log('window.undo 函数不存在');
+            }
+        }
+        
+        function testRedo() {
+            log('重做按钮被点击');
+            if (window.redo) {
+                const result = window.redo();
+                log('window.redo() 结果: ' + result);
+            } else {
+                log('window.redo 函数不存在');
+            }
+        }
+        
+        function enableButtons() {
+            document.getElementById('undoBtn').disabled = false;
+            document.getElementById('redoBtn').disabled = false;
+            log('按钮已启用');
+        }
+        
+        function disableButtons() {
+            document.getElementById('undoBtn').disabled = true;
+            document.getElementById('redoBtn').disabled = true;
+            log('按钮已禁用');
+        }
+        
+        function clearLog() {
+            document.getElementById('log').innerHTML = '';
+        }
+        
+        // 初始化
+        log('测试页面已加载');
+        log('undoBtn 存在: ' + !!document.getElementById('undoBtn'));
+        log('redoBtn 存在: ' + !!document.getElementById('redoBtn'));
+        
+        // 检查主页面的函数
+        setTimeout(() => {
+            log('window.undo 函数: ' + typeof window.undo);
+            log('window.redo 函数: ' + typeof window.redo);
+            log('window.ide 对象: ' + !!window.ide);
+        }, 1000);
+    </script>
+</body>
+</html> 

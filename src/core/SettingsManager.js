@@ -14,9 +14,8 @@ export class SettingsManager {
                 'toggleSidebar': 'Ctrl+B',
                 'commandPalette': 'Ctrl+Shift+P',
                 'toggleVersionSidebar': 'Ctrl+Shift+V',
-                'createSnapshot': 'Ctrl+Shift+S',
-                'undo': 'Ctrl+Z',
-                'redo': 'Ctrl+Y'
+                'createSnapshot': 'Ctrl+Shift+S'
+                // undo/redo 由编辑器直接处理，避免冲突
             },
             plugins: {
                 enabled: [],
@@ -138,9 +137,8 @@ export class SettingsManager {
             'toggleSidebar': 'Ctrl+B',
             'commandPalette': 'Ctrl+Shift+P',
             'toggleVersionSidebar': 'Ctrl+Shift+V',
-            'createSnapshot': 'Ctrl+Shift+S',
-            'undo': 'Ctrl+Z',
-            'redo': 'Ctrl+Y'
+            'createSnapshot': 'Ctrl+Shift+S'
+            // undo/redo 由编辑器直接处理，避免冲突
         };
         this.saveSettings();
     }

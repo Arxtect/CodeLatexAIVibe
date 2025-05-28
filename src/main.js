@@ -17,16 +17,18 @@ async function initIDE() {
         // 初始化文件系统
         await window.ide.fileSystem.init();
         
-        // 注册默认插件
+        // 注册语法插件（必须在编辑器初始化前注册）
         window.ide.pluginManager.registerPlugin(new LaTeXSyntaxPlugin());
-        window.ide.pluginManager.registerPlugin(new LaTeXAutoCompletePlugin());
-        window.ide.pluginManager.registerPlugin(new ExamplePlugin());
         
         // 初始化编辑器
         await window.ide.initEditor();
         
+        // 注册其他插件（在编辑器初始化后注册）
+        window.ide.pluginManager.registerPlugin(new LaTeXAutoCompletePlugin());
+        window.ide.pluginManager.registerPlugin(new ExamplePlugin());
+        
         // 初始化 UI
-        window.ide.initUI();
+        await window.ide.initUI();
         
         // 暴露设置 UI 到全局
         window.settingsUI = window.ide.settingsUI;
@@ -34,8 +36,69 @@ async function initIDE() {
         // 暴露版本侧边栏到全局
         window.versionSidebar = window.ide.versionSidebar;
         
+        // 暴露测试函数到全局
+        window.testAutoComplete = () => {
+            const plugin = window.ide.pluginManager.getPlugin('latex-autocomplete');
+            if (plugin && plugin.testAutoComplete) {
+                return plugin.testAutoComplete();
+            } else {
+                console.error('LaTeX 自动补全插件未找到');
+                return null;
+            }
+        };
+        
+        // Undo/Redo 测试函数已禁用
+        // window.testUndoRedo = () => {
+        //     if (!window.ide || !window.ide.versionManager) {
+        //         console.error('版本管理器未初始化');
+        //         return null;
+        //     }
+            
+        //     const vm = window.ide.versionManager;
+        //     console.log('Undo/Redo 功能测试:');
+        //     console.log('- UndoManager 已创建:', !!vm.undoManager);
+        //     console.log('- 可以撤销:', vm.canUndo());
+        //     console.log('- 可以重做:', vm.canRedo());
+        //     console.log('- 项目文档已初始化:', !!vm.projectDoc);
+        //     console.log('- 文件绑定数量:', vm.fileBindings.size);
+            
+        //     if (vm.projectDoc) {
+        //         const filesMap = vm.projectDoc.getMap('files');
+        //         console.log('- 项目中的文件数:', filesMap.size);
+        //         filesMap.forEach((yText, fileName) => {
+        //             console.log(`  - ${fileName}: ${yText.length} 字符`);
+        //         });
+        //     }
+            
+        //     // 强制更新按钮状态
+        //     window.ide.updateUndoRedoButtons();
+            
+        //     return {
+        //         undoManagerExists: !!vm.undoManager,
+        //         canUndo: vm.canUndo(),
+        //         canRedo: vm.canRedo(),
+        //         fileCount: vm.fileBindings.size
+        //     };
+        // };
+        
+        // // 暴露强制更新按钮状态的函数
+        // window.forceUpdateUndoRedoButtons = () => {
+        //     if (window.ide && window.ide.updateUndoRedoButtons) {
+        //         window.ide.updateUndoRedoButtons();
+        //         console.log('已强制更新 undo/redo 按钮状态');
+        //     }
+        // };
+        
         // 创建示例项目
         await createSampleProject();
+        
+        // Undo/Redo 按钮状态更新已禁用
+        // setTimeout(() => {
+        //     if (window.ide && window.ide.updateUndoRedoButtons) {
+        //         window.ide.updateUndoRedoButtons();
+        //         console.log('IDE 初始化完成，按钮状态已更新');
+        //     }
+        // }, 500);
         
         console.log('LaTeX IDE 初始化完成');
     } catch (error) {
@@ -241,19 +304,20 @@ window.createSnapshot = () => {
     }
 };
 
-window.undo = () => {
-    if (window.ide) {
-        return window.ide.undo();
-    }
-    return false;
-};
+// Undo/Redo functionality disabled
+// window.undo = () => {
+//     if (window.ide) {
+//         return window.ide.undo();
+//     }
+//     return false;
+// };
 
-window.redo = () => {
-    if (window.ide) {
-        return window.ide.redo();
-    }
-    return false;
-};
+// window.redo = () => {
+//     if (window.ide) {
+//         return window.ide.redo();
+//     }
+//     return false;
+// };
 
 // 页面加载完成后初始化
 document.addEventListener('DOMContentLoaded', initIDE); 

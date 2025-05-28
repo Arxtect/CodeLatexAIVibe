@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>UndoManager 测试</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        button { margin: 10px; padding: 10px 20px; }
+        button:disabled { background: #ccc; color: #666; cursor: not-allowed; }
+        .log { background: #f0f0f0; padding: 10px; margin: 10px 0; height: 300px; overflow-y: auto; }
+        #editor { width: 100%; height: 200px; border: 1px solid #ccc; padding: 10px; }
+    </style>
+</head>
+<body>
+    <h1>UndoManager 独立测试</h1>
+    
+    <div>
+        <button id="createBtn" onclick="createUndoManager()">创建 UndoManager</button>
+        <button id="undoBtn" onclick="testUndo()" disabled>撤销</button>
+        <button id="redoBtn" onclick="testRedo()" disabled>重做</button>
+        <button onclick="addText()">添加文本</button>
+        <button onclick="clearLog()">清空日志</button>
+    </div>
+    
+    <textarea id="editor" placeholder="在这里输入文本..."></textarea>
+    
+    <div class="log" id="log"></div>
+    
+    <script type="module">
+        import * as Y from 'yjs';
+        
+        let doc = null;
+        let yText = null;
+        let undoManager = null;
+        
+        window.Y = Y; // 暴露到全局
+        
+        function log(message) {
+            const logDiv = document.getElementById('log');
+            logDiv.innerHTML += new Date().toLocaleTimeString() + ': ' + message + '<br>';
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+        
+        window.createUndoManager = function() {
+            try {
+                log('开始创建 UndoManager...');
+                
+                // 创建 Y.Doc
+                doc = new Y.Doc();
+                log('✅ Y.Doc 创建成功');
+                
+                // 创建 Y.Text
+                yText = doc.getText('content');
+                log('✅ Y.Text 创建成功');
+                
+                // 创建 UndoManager
+                undoManager = new Y.UndoManager(yText);
+                log('✅ UndoManager 创建成功');
+                
+                // 监听 UndoManager 事件
+                undoManager.on('stack-item-added', () => {
+                    log('📝 UndoManager: stack-item-added');
+                    updateButtons();
+                });
+                
+                undoManager.on('stack-item-popped', () => {
+                    log('📤 UndoManager: stack-item-popped');
+                    updateButtons();
+                });
+                
+                // 监听 Y.Text 变化
+                yText.observe((event) => {
+                    log(`📄 Y.Text 变化: ${event.changes.delta.map(d => d.insert || d.delete || d.retain).join('')}`);
+                    updateEditor();
+                });
+                
+                // 绑定编辑器
+                const editor = document.getElementById('editor');
+                editor.addEventListener('input', () => {
+                    const content = editor.value;
+                    const currentContent = yText.toString();
+                    if (content !== currentContent) {
+                        yText.delete(0, yText.length);
+                        yText.insert(0, content);
+                    }
+                });
+                
+                updateButtons();
+                log('🎉 UndoManager 初始化完成');
+                
+            } catch (error) {
+                log('❌ 创建 UndoManager 失败: ' + error.message);
+                console.error(error);
+            }
+        };
+        
+        window.testUndo = function() {
+            if (undoManager && undoManager.canUndo()) {
+                log('⬅️ 执行撤销操作');
+                undoManager.undo();
+            } else {
+                log('❌ 无法撤销');
+            }
+        };
+        
+        window.testRedo = function() {
+            if (undoManager && undoManager.canRedo()) {
+                log('➡️ 执行重做操作');
+                undoManager.redo();
+            } else {
+                log('❌ 无法重做');
+            }
+        };
+        
+        window.addText = function() {
+            if (yText) {
+                const text = `文本${Date.now()} `;
+                yText.insert(yText.length, text);
+                log(`➕ 添加文本: "${text}"`);
+            } else {
+                log('❌ Y.Text 未初始化');
+            }
+        };
+        
+        function updateButtons() {
+            const undoBtn = document.getElementById('undoBtn');
+            const redoBtn = document.getElementById('redoBtn');
+            
+            if (undoManager) {
+                undoBtn.disabled = !undoManager.canUndo();
+                redoBtn.disabled = !undoManager.canRedo();
+                
+                log(`🔄 按钮状态更新: 撤销=${!undoBtn.disabled}, 重做=${!redoBtn.disabled}`);
+            } else {
+                undoBtn.disabled = true;
+                redoBtn.disabled = true;
+            }
+        }
+        
+        function updateEditor() {
+            if (yText) {
+                const editor = document.getElementById('editor');
+                const content = yText.toString();
+                if (editor.value !== content) {
+                    editor.value = content;
+                }
+            }
+        }
+        
+        window.clearLog = function() {
+            document.getElementById('log').innerHTML = '';
+        };
+        
+        // 初始化
+        log('UndoManager 测试页面已加载');
+        log('Y.js 版本: ' + (Y.version || '未知'));
+        log('点击"创建 UndoManager"开始测试');
+    </script>
+</body>
+</html> 

@@ -23,21 +23,36 @@ export class VersionManager {
 
     // 初始化项目版本管理
     async initProject(projectPath) {
+        console.log(`🚀 开始初始化项目版本管理: ${projectPath}`);
+        
         this.projectPath = projectPath;
         
         // 创建项目级 Y.Doc
         this.projectDoc = new Y.Doc();
+        console.log('✅ 项目文档已创建');
         
         // 设置项目持久化
         this.projectProvider = new IndexeddbPersistence(`project_${projectPath}`, this.projectDoc);
+        console.log('✅ 项目持久化提供者已创建');
         
         // 等待初始化完成
         await new Promise(resolve => {
-            this.projectProvider.on('synced', resolve);
+            this.projectProvider.on('synced', () => {
+                console.log('✅ 项目持久化同步完成');
+                resolve();
+            });
         });
         
-        // 设置 Undo/Redo 管理器
-        this.setupUndoManager();
+        // Undo/Redo 管理器已禁用
+        // console.log('🔧 开始设置 UndoManager...');
+        // this.setupUndoManager();
+        
+        // UndoManager 已禁用
+        // if (this.undoManager) {
+        //     console.log('✅ UndoManager 创建验证成功');
+        // } else {
+        //     console.error('❌ UndoManager 创建验证失败');
+        // }
         
         // 启动自动保存
         this.startAutoSave();
@@ -47,45 +62,93 @@ export class VersionManager {
             this.onProjectUpdate(update, origin);
         });
         
-        console.log(`项目版本管理已初始化: ${projectPath}`);
+        console.log(`✅ 项目版本管理初始化完成: ${projectPath}`);
+        console.log('- projectDoc:', !!this.projectDoc);
+        console.log('- undoManager:', !!this.undoManager);
+        console.log('- projectProvider:', !!this.projectProvider);
+        
         this.notifyListeners('projectInitialized', { projectPath });
     }
 
     // 设置 Undo/Redo 管理器
     setupUndoManager() {
         if (this.projectDoc) {
-            // 创建 UndoManager，跟踪所有文件的变化
-            const trackedTypes = [];
-            
-            // 获取所有文件的 YText
-            const filesMap = this.projectDoc.getMap('files');
-            filesMap.forEach((yText, fileName) => {
-                trackedTypes.push(yText);
-            });
-            
-            this.undoManager = new Y.UndoManager(trackedTypes);
-            
-            // 监听新文件添加
-            filesMap.observe(() => {
-                this.updateUndoManager();
-            });
+            try {
+                // 创建 UndoManager，初始时为空
+                this.undoManager = new Y.UndoManager([], {
+                    captureTimeout: 500 // 500ms 内的操作会被合并
+                });
+                
+                // 监听 UndoManager 状态变化
+                this.undoManager.on('stack-item-added', (event) => {
+                    console.log('UndoManager: 添加了新的操作到栈', event);
+                    this.notifyListeners('undoStackChanged', {});
+                });
+                
+                this.undoManager.on('stack-item-popped', (event) => {
+                    console.log('UndoManager: 从栈中弹出操作', event);
+                    this.notifyListeners('undoStackChanged', {});
+                });
+                
+                // 获取现有文件并添加到跟踪
+                const filesMap = this.projectDoc.getMap('files');
+                const existingFiles = [];
+                filesMap.forEach((yText, fileName) => {
+                    existingFiles.push(yText);
+                    console.log(`发现现有文件: ${fileName}`);
+                });
+                
+                if (existingFiles.length > 0) {
+                    // 重新创建 UndoManager 包含现有文件
+                    this.undoManager = new Y.UndoManager(existingFiles, {
+                        captureTimeout: 500
+                    });
+                    
+                    // 重新绑定事件
+                    this.undoManager.on('stack-item-added', (event) => {
+                        console.log('UndoManager: 添加了新的操作到栈', event);
+                        this.notifyListeners('undoStackChanged', {});
+                    });
+                    
+                    this.undoManager.on('stack-item-popped', (event) => {
+                        console.log('UndoManager: 从栈中弹出操作', event);
+                        this.notifyListeners('undoStackChanged', {});
+                    });
+                    
+                    console.log(`已将 ${existingFiles.length} 个现有文件添加到 UndoManager`);
+                }
+                
+                // 监听新文件添加
+                filesMap.observe((event) => {
+                    event.changes.keys.forEach((change, key) => {
+                        if (change.action === 'add') {
+                            const yText = filesMap.get(key);
+                            if (yText && this.undoManager) {
+                                this.undoManager.addToScope(yText);
+                                console.log(`已将新文件 ${key} 添加到 UndoManager 跟踪`);
+                            }
+                        }
+                    });
+                });
+                
+                console.log('✅ UndoManager 已成功初始化');
+                console.log('- UndoManager 实例:', !!this.undoManager);
+                console.log('- 初始 scope 大小:', this.undoManager.scope ? this.undoManager.scope.size : 0);
+                console.log('- trackedOrigins:', this.undoManager.trackedOrigins);
+                
+            } catch (error) {
+                console.error('❌ UndoManager 初始化失败:', error);
+                this.undoManager = null;
+            }
+        } else {
+            console.error('❌ 无法创建 UndoManager: projectDoc 不存在');
         }
     }
 
-    // 更新 UndoManager 跟踪的类型
+    // 更新 UndoManager 跟踪的类型（已废弃，使用 addToScope 代替）
     updateUndoManager() {
-        if (this.undoManager && this.projectDoc) {
-            const filesMap = this.projectDoc.getMap('files');
-            const trackedTypes = [];
-            
-            filesMap.forEach((yText, fileName) => {
-                trackedTypes.push(yText);
-            });
-            
-            // 重新创建 UndoManager
-            this.undoManager.destroy();
-            this.undoManager = new Y.UndoManager(trackedTypes);
-        }
+        // 这个方法已经不需要了，因为我们使用 addToScope 动态添加
+        console.log('UndoManager 使用动态添加，无需重新创建');
     }
 
     // 绑定文件到编辑器
@@ -100,13 +163,32 @@ export class VersionManager {
         
         // 获取或创建文件的 YText
         let yText = filesMap.get(relativePath);
+        let isNewFile = false;
+        
         if (!yText) {
             yText = new Y.Text();
             filesMap.set(relativePath, yText);
-            
-            // 更新 UndoManager
-            this.updateUndoManager();
+            isNewFile = true;
+            console.log(`创建新的 Y.Text 对象: ${relativePath}`);
         }
+
+        // UndoManager 已禁用
+        // if (this.undoManager && yText) {
+        //     // 检查是否已经在 scope 中
+        //     let alreadyInScope = false;
+        //     if (this.undoManager.scope) {
+        //         this.undoManager.scope.forEach(item => {
+        //             if (item === yText) {
+        //                 alreadyInScope = true;
+        //             }
+        //         });
+        //     }
+            
+        //     if (!alreadyInScope) {
+        //         this.undoManager.addToScope(yText);
+        //         console.log(`已将 Y.Text 添加到 UndoManager scope: ${relativePath}`);
+        //     }
+        // }
 
         // 如果已有绑定，先销毁
         if (this.fileBindings.has(filePath)) {
@@ -117,13 +199,15 @@ export class VersionManager {
         const binding = new MonacoBinding(
             yText,
             editor.getModel(),
-            new Set([editor]),
-            null
+            new Set([editor])
         );
 
         this.fileBindings.set(filePath, binding);
         
         console.log(`文件已绑定到项目版本管理: ${relativePath}`);
+        // console.log(`- UndoManager 存在:`, !!this.undoManager);
+        // console.log(`- UndoManager scope 大小:`, this.undoManager?.scope?.size || 0);
+        
         return binding;
     }
 
@@ -148,23 +232,31 @@ export class VersionManager {
         if (!this.projectDoc) return null;
 
         const filesMap = this.projectDoc.getMap('files');
+        
+        // 收集当前所有文件内容
+        const currentFiles = {};
+        filesMap.forEach((yText, fileName) => {
+            currentFiles[fileName] = {
+                content: yText.toString(),
+                size: yText.length
+            };
+        });
+
+        // 检查是否有内容变化
+        if (!this.hasContentChanged(currentFiles)) {
+            console.log('项目内容未发生变化，跳过快照创建');
+            return null;
+        }
+
         const projectSnapshot = {
             id: this.generateSnapshotId(),
             projectPath: this.projectPath,
             timestamp: new Date().toISOString(),
             description: description,
-            files: {},
+            files: currentFiles,
             state: Y.encodeStateAsUpdate(this.projectDoc),
             version: this.getNextProjectVersion()
         };
-
-        // 收集所有文件内容
-        filesMap.forEach((yText, fileName) => {
-            projectSnapshot.files[fileName] = {
-                content: yText.toString(),
-                size: yText.length
-            };
-        });
 
         // 保存快照
         this.saveProjectSnapshot(projectSnapshot);
@@ -173,6 +265,49 @@ export class VersionManager {
         
         console.log(`项目快照已创建: ${projectSnapshot.id}`);
         return projectSnapshot;
+    }
+
+    // 检查内容是否有变化
+    hasContentChanged(currentFiles) {
+        const snapshots = this.getProjectSnapshots();
+        
+        // 如果没有历史快照，说明是第一次，需要创建
+        if (snapshots.length === 0) {
+            return true;
+        }
+
+        // 获取最新快照
+        const latestSnapshot = snapshots[snapshots.length - 1];
+        
+        // 比较文件数量
+        const currentFileNames = Object.keys(currentFiles);
+        const latestFileNames = Object.keys(latestSnapshot.files);
+        
+        if (currentFileNames.length !== latestFileNames.length) {
+            return true;
+        }
+
+        // 比较每个文件的内容
+        for (const fileName of currentFileNames) {
+            // 检查文件是否存在于最新快照中
+            if (!latestSnapshot.files[fileName]) {
+                return true;
+            }
+            
+            // 比较文件内容
+            if (currentFiles[fileName].content !== latestSnapshot.files[fileName].content) {
+                return true;
+            }
+        }
+
+        // 检查是否有文件被删除
+        for (const fileName of latestFileNames) {
+            if (!currentFiles[fileName]) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     // 恢复项目快照
@@ -348,41 +483,52 @@ export class VersionManager {
         return { diff, stats };
     }
 
-    // Undo 操作
+    // Undo 操作 - 已禁用
     undo() {
-        if (this.undoManager && this.undoManager.canUndo()) {
-            this.undoManager.undo();
-            this.notifyListeners('undoPerformed', {});
-            return true;
-        }
+        console.log('Undo functionality disabled');
         return false;
+        // if (this.undoManager && this.undoManager.canUndo()) {
+        //     this.undoManager.undo();
+        //     this.notifyListeners('undoPerformed', {});
+        //     return true;
+        // }
+        // return false;
     }
 
-    // Redo 操作
+    // Redo 操作 - 已禁用
     redo() {
-        if (this.undoManager && this.undoManager.canRedo()) {
-            this.undoManager.redo();
-            this.notifyListeners('redoPerformed', {});
-            return true;
-        }
+        console.log('Redo functionality disabled');
         return false;
+        // if (this.undoManager && this.undoManager.canRedo()) {
+        //     this.undoManager.redo();
+        //     this.notifyListeners('redoPerformed', {});
+        //     return true;
+        // }
+        // return false;
     }
 
-    // 检查是否可以 Undo
+    // 检查是否可以 Undo - 已禁用
     canUndo() {
-        return this.undoManager ? this.undoManager.canUndo() : false;
+        return false;
+        // return this.undoManager ? this.undoManager.canUndo() : false;
     }
 
-    // 检查是否可以 Redo
+    // 检查是否可以 Redo - 已禁用
     canRedo() {
-        return this.undoManager ? this.undoManager.canRedo() : false;
+        return false;
+        // return this.undoManager ? this.undoManager.canRedo() : false;
     }
 
     // 启动自动保存
     startAutoSave() {
         if (this.autoSaveEnabled && !this.autoSaveTimer) {
             this.autoSaveTimer = setInterval(() => {
-                this.createProjectSnapshot('自动保存');
+                const snapshot = this.createProjectSnapshot('自动保存');
+                if (snapshot) {
+                    console.log('自动保存快照已创建');
+                } else {
+                    console.log('自动保存：内容未变化，跳过快照创建');
+                }
             }, this.autoSaveInterval);
             
             console.log(`自动保存已启动，间隔: ${this.autoSaveInterval / 1000}秒`);

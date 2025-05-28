@@ -51,12 +51,13 @@ export class VersionSidebar {
                         <button class="btn-small btn-primary" onclick="window.versionSidebar.createSnapshot()" title="创建快照">
                             📸
                         </button>
-                        <button class="btn-small btn-secondary" id="undoBtn" onclick="window.versionSidebar.undo()" title="撤销" disabled>
+                        <!-- Undo/Redo buttons disabled -->
+                        <!-- <button class="btn-small btn-secondary" id="sidebarUndoBtn" onclick="window.versionSidebar.undo()" title="撤销" disabled>
                             ↶
                         </button>
-                        <button class="btn-small btn-secondary" id="redoBtn" onclick="window.versionSidebar.redo()" title="重做" disabled>
+                        <button class="btn-small btn-secondary" id="sidebarRedoBtn" onclick="window.versionSidebar.redo()" title="重做" disabled>
                             ↷
-                        </button>
+                        </button> -->
                     </div>
                 </div>
                 <div class="version-sidebar-content" id="versionSidebarContent">
@@ -211,26 +212,60 @@ export class VersionSidebar {
         }
     }
 
-    // 更新撤销/重做按钮状态
+    // 更新撤销/重做按钮状态 - 已禁用
     updateUndoRedoButtons() {
-        const undoBtn = document.getElementById('undoBtn');
-        const redoBtn = document.getElementById('redoBtn');
+        // Undo/Redo functionality disabled
+        // const sidebarUndoBtn = document.getElementById('sidebarUndoBtn');
+        // const sidebarRedoBtn = document.getElementById('sidebarRedoBtn');
         
-        if (undoBtn) {
-            undoBtn.disabled = !this.versionManager.canUndo();
-        }
+        // if (sidebarUndoBtn) {
+        //     sidebarUndoBtn.disabled = !this.versionManager.canUndo();
+        // }
         
-        if (redoBtn) {
-            redoBtn.disabled = !this.versionManager.canRedo();
-        }
+        // if (sidebarRedoBtn) {
+        //     sidebarRedoBtn.disabled = !this.versionManager.canRedo();
+        // }
+        
+        // // 同时更新工具栏按钮
+        // if (this.ide && this.ide.updateUndoRedoButtons) {
+        //     this.ide.updateUndoRedoButtons();
+        // }
     }
 
     // 创建快照
     createSnapshot() {
         const description = prompt('请输入快照描述（可选）:');
         if (description !== null) {
-            this.versionManager.createProjectSnapshot(description);
+            const snapshot = this.versionManager.createProjectSnapshot(description);
+            if (!snapshot) {
+                // 显示提示信息
+                this.showNotification('项目内容未发生变化，无需创建快照', 'info');
+            }
         }
+    }
+
+    // 显示通知
+    showNotification(message, type = 'info') {
+        const notification = document.createElement('div');
+        notification.className = `notification notification-${type}`;
+        notification.textContent = message;
+        
+        document.body.appendChild(notification);
+        
+        // 显示动画
+        setTimeout(() => {
+            notification.classList.add('show');
+        }, 100);
+        
+        // 自动隐藏
+        setTimeout(() => {
+            notification.classList.remove('show');
+            setTimeout(() => {
+                if (notification.parentNode) {
+                    notification.parentNode.removeChild(notification);
+                }
+            }, 300);
+        }, 3000);
     }
 
     // 恢复快照
@@ -255,14 +290,16 @@ export class VersionSidebar {
         }
     }
 
-    // 撤销操作
+    // 撤销操作 - 已禁用
     undo() {
-        this.versionManager.undo();
+        console.log('Undo functionality disabled');
+        // this.versionManager.undo();
     }
 
-    // 重做操作
+    // 重做操作 - 已禁用
     redo() {
-        this.versionManager.redo();
+        console.log('Redo functionality disabled');
+        // this.versionManager.redo();
     }
 
     // 打开版本设置页面
@@ -306,6 +343,23 @@ export class VersionSidebar {
             </div>
         `;
 
+        // 添加键盘事件监听
+        const handleKeyDown = (e) => {
+            if (e.key === 'Escape') {
+                modal.remove();
+                document.removeEventListener('keydown', handleKeyDown);
+            }
+        };
+        
+        // 添加点击背景关闭
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                modal.remove();
+                document.removeEventListener('keydown', handleKeyDown);
+            }
+        });
+
+        document.addEventListener('keydown', handleKeyDown);
         document.body.appendChild(modal);
         modal.style.display = 'flex';
     }
@@ -326,6 +380,23 @@ export class VersionSidebar {
             </div>
         `;
 
+        // 添加键盘事件监听
+        const handleKeyDown = (e) => {
+            if (e.key === 'Escape') {
+                modal.remove();
+                document.removeEventListener('keydown', handleKeyDown);
+            }
+        };
+        
+        // 添加点击背景关闭
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                modal.remove();
+                document.removeEventListener('keydown', handleKeyDown);
+            }
+        });
+
+        document.addEventListener('keydown', handleKeyDown);
         document.body.appendChild(modal);
         modal.style.display = 'flex';
     }

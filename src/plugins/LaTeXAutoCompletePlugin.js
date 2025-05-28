@@ -14,32 +14,52 @@ export class LaTeXAutoCompletePlugin {
 
     init(pluginManager) {
         this.pluginManager = pluginManager;
-        this.registerCompletionProvider();
+        // 延迟注册，确保 Monaco Editor 已经完全初始化
+        setTimeout(() => {
+            this.registerCompletionProvider();
+        }, 100);
     }
 
     registerCompletionProvider() {
-        this.completionProvider = monaco.languages.registerCompletionItemProvider('latex', {
-            provideCompletionItems: (model, position) => {
-                return this.provideCompletionItems(model, position);
-            },
-            triggerCharacters: ['\\', '{', '[', '$']
-        });
+        try {
+            this.completionProvider = monaco.languages.registerCompletionItemProvider('latex', {
+                provideCompletionItems: (model, position) => {
+                    return this.provideCompletionItems(model, position);
+                },
+                triggerCharacters: ['\\', '{', '[', '$']
+            });
 
-        console.log('LaTeX 自动完成插件初始化完成');
+            console.log('LaTeX 自动完成插件初始化完成');
+        } catch (error) {
+            console.error('LaTeX 自动完成插件注册失败:', error);
+        }
     }
 
     provideCompletionItems(model, position) {
         const word = model.getWordUntilPosition(position);
-        const range = {
-            startLineNumber: position.lineNumber,
-            endLineNumber: position.lineNumber,
-            startColumn: word.startColumn,
-            endColumn: word.endColumn
-        };
-
         const line = model.getLineContent(position.lineNumber);
         const beforeCursor = line.substring(0, position.column - 1);
         
+        // 计算正确的范围
+        let startColumn = word.startColumn;
+        let endColumn = word.endColumn;
+        
+        // 如果是反斜杠开头的命令，包含反斜杠
+        if (beforeCursor.endsWith('\\') || /\\[a-zA-Z]*$/.test(beforeCursor)) {
+            const match = beforeCursor.match(/\\[a-zA-Z]*$/);
+            if (match) {
+                startColumn = position.column - match[0].length;
+                endColumn = position.column;
+            }
+        }
+        
+        const range = {
+            startLineNumber: position.lineNumber,
+            endLineNumber: position.lineNumber,
+            startColumn: startColumn,
+            endColumn: endColumn
+        };
+
         const suggestions = [];
 
         // 检查是否在输入命令
@@ -60,6 +80,25 @@ export class LaTeXAutoCompletePlugin {
         // 检查是否在输入包名
         if (/\\usepackage\{[^}]*$/.test(beforeCursor)) {
             suggestions.push(...this.getPackageCompletions(range));
+        }
+
+        // 如果没有特定上下文，但用户正在输入，提供基本的 LaTeX 命令
+        if (suggestions.length === 0) {
+            // 检查是否在输入任何内容
+            if (word.word.length > 0 || beforeCursor.endsWith('\\')) {
+                suggestions.push(...this.getCommandCompletions(range));
+            }
+        }
+
+        // 调试信息（仅在开发模式下显示）
+        if (suggestions.length > 0) {
+            console.log('LaTeX 自动补全:', {
+                position,
+                beforeCursor,
+                word: word.word,
+                range,
+                suggestionsCount: suggestions.length
+            });
         }
 
         return { suggestions };
@@ -392,6 +431,32 @@ export class LaTeXAutoCompletePlugin {
             environments: this.getEnvironmentCompletions({}).length,
             mathSymbols: this.getMathCompletions({}).length,
             packages: this.getPackageCompletions({}).length
+        };
+    }
+
+    // 测试自动补全功能
+    testAutoComplete() {
+        console.log('测试 LaTeX 自动补全功能:');
+        console.log('- 插件已启用:', this.enabled);
+        console.log('- 完成提供者已注册:', !!this.completionProvider);
+        console.log('- 统计信息:', this.getCompletionStats());
+        
+        // 测试一个简单的补全
+        const testRange = {
+            startLineNumber: 1,
+            endLineNumber: 1,
+            startColumn: 1,
+            endColumn: 1
+        };
+        
+        const commands = this.getCommandCompletions(testRange);
+        console.log('- 可用命令数量:', commands.length);
+        console.log('- 前5个命令:', commands.slice(0, 5).map(c => c.label));
+        
+        return {
+            enabled: this.enabled,
+            registered: !!this.completionProvider,
+            commandCount: commands.length
         };
     }
 } 

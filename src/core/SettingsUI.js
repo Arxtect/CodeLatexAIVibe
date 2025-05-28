@@ -80,7 +80,7 @@ export class SettingsUI {
         const actionDescriptions = {
             'newFile': '新建文件',
             'openFile': '打开文件',
-            'saveFile': '保存文件',
+            'saveFile': '创建快照（内容已实时同步）',
             'closeTab': '关闭标签',
             'compile': '编译',
             'rename': '重命名',
@@ -537,8 +537,12 @@ export class SettingsUI {
         if (window.ide && window.ide.versionManager) {
             const description = prompt('请输入快照描述（可选）:');
             if (description !== null) {
-                window.ide.versionManager.createProjectSnapshot(description);
-                this.loadVersionSettings();
+                const snapshot = window.ide.versionManager.createProjectSnapshot(description);
+                if (snapshot) {
+                    this.loadVersionSettings();
+                } else {
+                    alert('项目内容未发生变化，无需创建快照');
+                }
             }
         }
     }

@@ -169,6 +169,21 @@
             background: #1177bb;
         }
         
+        .toolbar button:disabled {
+            background: #555;
+            color: #888;
+            cursor: not-allowed;
+        }
+        
+        .toolbar button:disabled:hover {
+            background: #555;
+        }
+        
+        /* Undo/Redo buttons disabled */
+        /* #undoBtn, #redoBtn {
+            min-width: 70px;
+        } */
+        
         .editor-container {
             flex: 1;
             position: relative;
@@ -1251,7 +1266,10 @@
             <div class="toolbar">
                 <button onclick="createNewFile()">新建文件</button>
                 <button onclick="createNewFolder()">新建文件夹</button>
-                <button onclick="saveCurrentFile()">保存</button>
+                <button onclick="saveCurrentFile()" title="创建版本快照（内容已实时同步）">💾 快照</button>
+                <!-- Undo/Redo buttons disabled -->
+                <!-- <button onclick="undo()" id="undoBtn" title="撤销 (Ctrl+Z)">↶ 撤销</button> -->
+                <!-- <button onclick="redo()" id="redoBtn" title="重做 (Ctrl+Y)">↷ 重做</button> -->
                 <button onclick="compileLatex()">编译</button>
                 <button onclick="toggleVersionSidebar()">版本历史</button>
                 <button onclick="openSettings()">设置</button>
@@ -1270,6 +1288,7 @@
                 <span id="cursorPosition">行 1, 列 1</span>
                 <span id="fileEncoding">UTF-8</span>
                 <span id="fileType">LaTeX</span>
+                <span style="margin-left: auto; font-size: 11px; opacity: 0.8;">💾 内容实时同步</span>
             </div>
         </div>
     </div>

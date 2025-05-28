@@ -26,7 +26,7 @@ export class IDE {
     }
 
     setupShortcuts() {
-        // 注册所有快捷键动作
+        // 注册所有快捷键动作（除了 undo/redo，它们在编辑器级别处理）
         this.shortcutManager.registerAction('newFile', () => this.createNewFile(), '新建文件');
         this.shortcutManager.registerAction('saveFile', () => this.saveCurrentFile(), '保存文件');
         this.shortcutManager.registerAction('closeTab', () => this.closeCurrentTab(), '关闭标签');
@@ -36,8 +36,7 @@ export class IDE {
         this.shortcutManager.registerAction('toggleSidebar', () => this.toggleSidebar(), '切换侧边栏');
         this.shortcutManager.registerAction('toggleVersionSidebar', () => this.toggleVersionSidebar(), '切换版本侧边栏');
         this.shortcutManager.registerAction('createSnapshot', () => this.createSnapshot(), '创建快照');
-        this.shortcutManager.registerAction('undo', () => this.undo(), '撤销');
-        this.shortcutManager.registerAction('redo', () => this.redo(), '重做');
+        // undo/redo 在编辑器级别处理，避免冲突
     }
 
     setupSettingsListeners() {
@@ -122,14 +121,39 @@ export class IDE {
             folding: true,
             lineDecorationsWidth: 10,
             lineNumbersMinChars: 3,
-            glyphMargin: true
+            glyphMargin: true,
+            // 禁用编辑器内置的 undo/redo，使用 Yjs UndoManager
+            find: {
+                addExtraSpaceOnTop: false
+            }
         });
+
+        // Undo/Redo functionality disabled - using Monaco's built-in undo/redo
+        // this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyZ, () => {
+        //     console.log('Ctrl+Z 被触发，使用 Yjs UndoManager');
+        //     this.undo();
+        // });
+        
+        // this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyY, () => {
+        //     console.log('Ctrl+Y 被触发，使用 Yjs UndoManager');
+        //     this.redo();
+        // });
+        
+        // this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyZ, () => {
+        //     console.log('Ctrl+Shift+Z 被触发，使用 Yjs UndoManager');
+        //     this.redo();
+        // });
 
         // 监听编辑器内容变化
         this.editor.onDidChangeModelContent(() => {
-            this.isDirty = true;
+            // 内容变化会自动通过 Yjs 同步，无需设置 isDirty
             this.updateTabStatus();
             this.updateStatusBar();
+            
+            // Undo/Redo functionality disabled
+            // setTimeout(() => {
+            //     this.updateUndoRedoButtons();
+            // }, 10);
         });
 
         // 监听光标位置变化
@@ -165,6 +189,38 @@ export class IDE {
         // 使用当前工作目录作为项目路径
         const projectPath = '/'; // 根目录作为项目路径
         await this.versionManager.initProject(projectPath);
+        
+        // Undo/Redo functionality disabled
+        // this.versionManager.on('undoPerformed', () => {
+        //     this.updateUndoRedoButtons();
+        // });
+        
+        // this.versionManager.on('redoPerformed', () => {
+        //     this.updateUndoRedoButtons();
+        // });
+        
+        // this.versionManager.on('projectUpdated', () => {
+        //     // 延迟更新，确保操作完成
+        //     setTimeout(() => {
+        //         this.updateUndoRedoButtons();
+        //     }, 10);
+        // });
+        
+        // this.versionManager.on('undoStackChanged', () => {
+        //     // UndoManager 栈发生变化时更新按钮
+        //     this.updateUndoRedoButtons();
+        // });
+        
+        // // 初始化完成后立即更新按钮状态
+        // setTimeout(() => {
+        //     this.updateUndoRedoButtons();
+        // }, 100);
+        
+        // // 再次确保按钮状态正确
+        // setTimeout(() => {
+        //     this.updateUndoRedoButtons();
+        // }, 500);
+        
         console.log('项目版本管理已初始化');
     }
 
@@ -527,7 +583,29 @@ export class IDE {
                 return;
             }
 
-            const content = await this.fileSystem.readFile(filePath);
+            // 首先尝试从 Yjs 项目文档中获取内容
+            let content = '';
+            const relativePath = this.versionManager.getRelativePath(filePath);
+            
+            if (this.versionManager.projectDoc) {
+                const filesMap = this.versionManager.projectDoc.getMap('files');
+                const yText = filesMap.get(relativePath);
+                if (yText) {
+                    content = yText.toString();
+                } else {
+                    // 如果 Yjs 中没有，尝试从文件系统读取
+                    try {
+                        content = await this.fileSystem.readFile(filePath);
+                    } catch (fsError) {
+                        // 如果文件系统中也没有，创建空文件
+                        content = '';
+                        console.log(`创建新文件: ${filePath}`);
+                    }
+                }
+            } else {
+                // 如果版本管理未初始化，从文件系统读取
+                content = await this.fileSystem.readFile(filePath);
+            }
             
             // 创建新标签
             this.createTab(filePath);
@@ -542,18 +620,33 @@ export class IDE {
             // 切换到新标签
             this.switchToTab(filePath);
             
-            // 设置编辑器内容
-            this.editor.setValue(content);
-            
             // 根据文件扩展名设置语言
             const language = this.getLanguageFromFileName(filePath);
             monaco.editor.setModelLanguage(this.editor.getModel(), language);
 
-            // 绑定版本管理
-            this.versionManager.bindFileToEditor(filePath, this.editor);
+            // 先绑定版本管理，然后设置内容
+            const binding = this.versionManager.bindFileToEditor(filePath, this.editor);
+            
+            // 如果有内容且 Yjs 中没有，需要同步到 Yjs
+            if (content && binding) {
+                const relativePath = this.versionManager.getRelativePath(filePath);
+                const filesMap = this.versionManager.projectDoc.getMap('files');
+                const yText = filesMap.get(relativePath);
+                
+                if (yText && yText.length === 0 && content.length > 0) {
+                    // Yjs 中是空的，但文件系统有内容，需要同步
+                    yText.insert(0, content);
+                    console.log(`已同步文件内容到 Yjs: ${relativePath}`);
+                }
+            }
 
             this.isDirty = false;
             this.updateStatusBar();
+            
+            // 绑定完成后更新按钮状态
+            setTimeout(() => {
+                this.updateUndoRedoButtons();
+            }, 100);
             
         } catch (error) {
             console.error('打开文件失败:', error);
@@ -581,13 +674,6 @@ export class IDE {
     }
 
     switchToTab(filePath) {
-        // 保存当前文件内容
-        if (this.currentFile && this.openTabs.has(this.currentFile)) {
-            const tabData = this.openTabs.get(this.currentFile);
-            tabData.content = this.editor.getValue();
-            tabData.isDirty = this.isDirty;
-        }
-
         // 更新当前文件
         this.currentFile = filePath;
         
@@ -599,14 +685,15 @@ export class IDE {
             }
         });
 
-        // 加载文件内容到编辑器
-        if (this.openTabs.has(filePath)) {
-            const tabData = this.openTabs.get(filePath);
-            this.editor.setValue(tabData.content);
-            this.isDirty = tabData.isDirty;
-        }
+        // 重新绑定版本管理（这会自动同步编辑器内容）
+        this.versionManager.bindFileToEditor(filePath, this.editor);
 
         this.updateStatusBar();
+        
+        // 切换文件后更新按钮状态
+        setTimeout(() => {
+            this.updateUndoRedoButtons();
+        }, 100);
     }
 
     closeTab(filePath) {
@@ -662,14 +749,15 @@ export class IDE {
 
     async saveFile(filePath) {
         try {
-            const content = this.editor.getValue();
-            await this.fileSystem.writeFile(filePath, content);
+            // 现在保存操作主要是创建版本快照
+            // 因为 Yjs 已经实时同步了内容到项目文档
+            const snapshot = this.versionManager.createProjectSnapshot(`手动保存: ${filePath.split('/').pop()}`);
             
             // 更新标签数据
             if (this.openTabs.has(filePath)) {
                 const tabData = this.openTabs.get(filePath);
-                tabData.content = content;
-                tabData.originalContent = content;
+                tabData.content = this.editor.getValue();
+                tabData.originalContent = this.editor.getValue();
                 tabData.isDirty = false;
             }
 
@@ -677,7 +765,12 @@ export class IDE {
             this.updateTabStatus();
             this.updateStatusBar();
             
-            document.getElementById('statusText').textContent = '文件已保存';
+            if (snapshot) {
+                document.getElementById('statusText').textContent = '已保存并创建快照';
+            } else {
+                document.getElementById('statusText').textContent = '内容已同步（无变化）';
+            }
+            
             setTimeout(() => {
                 document.getElementById('statusText').textContent = '就绪';
             }, 2000);
@@ -694,7 +787,8 @@ export class IDE {
             if (tab) {
                 const fileName = tab.querySelector('span');
                 const originalName = this.currentFile.split('/').pop();
-                fileName.textContent = this.isDirty ? `${originalName} •` : originalName;
+                // 移除"已修改"指示器，因为内容是实时同步的
+                fileName.textContent = originalName;
             }
         }
     }
@@ -706,9 +800,54 @@ export class IDE {
         // 更新状态文本
         if (this.currentFile) {
             const fileName = this.currentFile.split('/').pop();
-            const isDirty = this.isDirty ? ' (已修改)' : '';
-            document.getElementById('statusText').textContent = `${fileName}${isDirty}`;
+            // 移除"已修改"状态，显示实时同步状态
+            document.getElementById('statusText').textContent = `${fileName} (实时同步)`;
         }
+        
+        // 更新 undo/redo 按钮状态
+        this.updateUndoRedoButtons();
+    }
+
+    updateUndoRedoButtons() {
+        // Undo/Redo functionality disabled
+        // const undoBtn = document.getElementById('undoBtn');
+        // const redoBtn = document.getElementById('redoBtn');
+        
+        // if (this.versionManager) {
+        //     const canUndo = this.versionManager.canUndo();
+        //     const canRedo = this.versionManager.canRedo();
+            
+        //     if (undoBtn) {
+        //         undoBtn.disabled = !canUndo;
+        //         // 强制移除 disabled 属性如果应该启用
+        //         if (canUndo && undoBtn.hasAttribute('disabled')) {
+        //             undoBtn.removeAttribute('disabled');
+        //         }
+        //         // console.log(`工具栏撤销按钮状态: ${canUndo ? '启用' : '禁用'}`);
+        //     } else {
+        //         console.warn('工具栏撤销按钮未找到');
+        //     }
+            
+        //     if (redoBtn) {
+        //         redoBtn.disabled = !canRedo;
+        //         // 强制移除 disabled 属性如果应该启用
+        //         if (canRedo && redoBtn.hasAttribute('disabled')) {
+        //             redoBtn.removeAttribute('disabled');
+        //         }
+        //         // console.log(`工具栏重做按钮状态: ${canRedo ? '启用' : '禁用'}`);
+        //     } else {
+        //         console.warn('工具栏重做按钮未找到');
+        //     }
+        // } else {
+        //     // 如果版本管理器未初始化，禁用按钮
+        //     if (undoBtn) {
+        //         undoBtn.disabled = true;
+        //     }
+        //     if (redoBtn) {
+        //         redoBtn.disabled = true;
+        //     }
+        //     console.warn('版本管理器未初始化，按钮已禁用');
+        // }
     }
 
     updateCursorPosition(position) {
@@ -798,39 +937,68 @@ export class IDE {
         if (this.versionManager) {
             const description = prompt('请输入快照描述（可选）:');
             if (description !== null) {
-                this.versionManager.createProjectSnapshot(description);
+                const snapshot = this.versionManager.createProjectSnapshot(description);
+                if (!snapshot) {
+                    // 显示状态栏提示
+                    document.getElementById('statusText').textContent = '项目内容未发生变化，无需创建快照';
+                    setTimeout(() => {
+                        document.getElementById('statusText').textContent = '就绪';
+                    }, 3000);
+                }
             }
         }
     }
 
     undo() {
-        if (this.versionManager) {
-            return this.versionManager.undo();
-        }
+        // Undo/Redo functionality disabled - using Monaco's built-in undo/redo
+        console.log('Undo functionality disabled');
         return false;
+        
+        // if (this.versionManager) {
+        //     const success = this.versionManager.undo();
+        //     if (success) {
+        //         document.getElementById('statusText').textContent = '已撤销操作';
+        //         setTimeout(() => {
+        //             this.updateStatusBar();
+        //         }, 1000);
+        //     } else {
+        //         document.getElementById('statusText').textContent = '无可撤销的操作';
+        //         setTimeout(() => {
+        //             this.updateStatusBar();
+        //         }, 1000);
+        //     }
+        //     return success;
+        // }
+        // return false;
     }
 
     redo() {
-        if (this.versionManager) {
-            return this.versionManager.redo();
-        }
+        // Undo/Redo functionality disabled - using Monaco's built-in undo/redo
+        console.log('Redo functionality disabled');
         return false;
+        
+        // if (this.versionManager) {
+        //     const success = this.versionManager.redo();
+        //     if (success) {
+        //         document.getElementById('statusText').textContent = '已重做操作';
+        //         setTimeout(() => {
+        //             this.updateStatusBar();
+        //         }, 1000);
+        //     } else {
+        //         document.getElementById('statusText').textContent = '无可重做的操作';
+        //         setTimeout(() => {
+        //             this.updateStatusBar();
+        //         }, 1000);
+        //     }
+        //     return success;
+        // }
+        // return false;
     }
 
     // 重写 closeTab 方法以清理版本管理
     closeTab(filePath) {
-        // 检查是否有未保存的更改
-        if (this.openTabs.has(filePath)) {
-            const tabData = this.openTabs.get(filePath);
-            if (tabData.isDirty) {
-                const shouldSave = confirm('文件有未保存的更改，是否保存？');
-                if (shouldSave) {
-                    this.saveFile(filePath);
-                }
-            }
-        }
-
-        // 解绑版本管理
+        // 由于内容是实时同步的，无需确认保存
+        // 直接解绑版本管理
         this.versionManager.unbindFile(filePath);
 
         // 移除标签
@@ -851,7 +1019,6 @@ export class IDE {
             } else {
                 this.currentFile = null;
                 this.editor.setValue('');
-                this.isDirty = false;
                 this.updateStatusBar();
             }
         }
