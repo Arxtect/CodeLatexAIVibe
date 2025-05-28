@@ -127,6 +127,14 @@ export class IDE {
             lineDecorationsWidth: 10,
             lineNumbersMinChars: 3,
             glyphMargin: true,
+            // Disable features that might trigger worker loading
+            colorDecorators: false,
+            hover: {
+                enabled: false
+            },
+            suggest: {
+                showColors: false
+            },
             // 禁用编辑器内置的 undo/redo，使用 Yjs UndoManager
             find: {
                 addExtraSpaceOnTop: false
@@ -1061,7 +1069,8 @@ export class IDE {
             case 'js':
                 return 'javascript';
             case 'json':
-                return 'json';
+                // Use plaintext instead of json to avoid worker issues
+                return 'plaintext';
             case 'html':
                 return 'html';
             case 'css':
@@ -1149,8 +1158,14 @@ export class IDE {
      * 切换 Agent 面板
      */
     toggleAgentPanel() {
-        if (window.toggleAgentPanel) {
-            window.toggleAgentPanel();
+        // 直接调用 AgentPanel 插件的方法，避免无限递归
+        const agentPanel = this.pluginManager.getPlugin('agent-panel');
+        if (agentPanel && agentPanel.togglePanel) {
+            agentPanel.togglePanel();
+        } else if (window.agentPanel && window.agentPanel.toggle) {
+            window.agentPanel.toggle();
+        } else {
+            console.warn('Agent 面板未找到或未初始化');
         }
     }
 
@@ -1158,8 +1173,14 @@ export class IDE {
      * 显示 Agent 面板
      */
     showAgentPanel() {
-        if (window.showAgentPanel) {
-            window.showAgentPanel();
+        // 直接调用 AgentPanel 插件的方法，避免无限递归
+        const agentPanel = this.pluginManager.getPlugin('agent-panel');
+        if (agentPanel && agentPanel.showPanel) {
+            agentPanel.showPanel();
+        } else if (window.agentPanel && window.agentPanel.show) {
+            window.agentPanel.show();
+        } else {
+            console.warn('Agent 面板未找到或未初始化');
         }
     }
 
@@ -1167,8 +1188,14 @@ export class IDE {
      * 隐藏 Agent 面板
      */
     hideAgentPanel() {
-        if (window.hideAgentPanel) {
-            window.hideAgentPanel();
+        // 直接调用 AgentPanel 插件的方法，避免无限递归
+        const agentPanel = this.pluginManager.getPlugin('agent-panel');
+        if (agentPanel && agentPanel.hidePanel) {
+            agentPanel.hidePanel();
+        } else if (window.agentPanel && window.agentPanel.hide) {
+            window.agentPanel.hide();
+        } else {
+            console.warn('Agent 面板未找到或未初始化');
         }
     }
 

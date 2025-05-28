@@ -294,7 +294,7 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
     }
     
     /**
-     * 处理用户消息
+     * 处理消息
      */
     async processMessage(message, context, onStream = null) {
         try {
@@ -322,35 +322,118 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
             // 收集上下文
             const fullContext = await this.collectContext(message, context);
             
-            // 分析任务并生成执行计划或直接响应
-            const result = await this.analyzeAndPlan(message, fullContext, onStream);
+            // 初始化对话历史和循环控制
+            let conversationMessages = [];
+            let maxIterations = 5; // 防止无限循环
+            let iteration = 0;
+            let originalMessage = message; // 保存原始消息
             
-            if (!result) {
-                return this.createResponse('❌ 无法理解您的需求，请重新描述');
+            while (iteration < maxIterations) {
+                iteration++;
+                this.log('info', `处理迭代 ${iteration}/${maxIterations}`);
+                
+                // 判断是否需要使用工具调用
+                const shouldUseTools = this.shouldUseTools(originalMessage, conversationMessages);
+                
+                if (shouldUseTools) {
+                    this.log('info', '使用工具调用模式');
+                    
+                    // 构建工具调用的消息
+                    const systemPrompt = this.buildSystemPrompt();
+                    const userPrompt = this.buildUserPrompt(originalMessage, fullContext);
+                    
+                    const toolCallMessages = [
+                        { role: 'system', content: systemPrompt },
+                        { role: 'user', content: userPrompt },
+                        ...conversationMessages
+                    ];
+                    
+                    // 调用API进行工具调用
+                    const toolCallResponse = await this.callOpenAI(toolCallMessages, onStream);
+                    
+                    // 检查是否是工具调用响应
+                    if (typeof toolCallResponse === 'object' && toolCallResponse.isToolCallResponse) {
+                        // 工具调用完成，将结果添加到对话历史
+                        conversationMessages.push({
+                            role: 'assistant',
+                            content: toolCallResponse.content
+                        });
+                        
+                        this.log('info', '工具调用完成，继续处理后续响应');
+                        // 继续下一轮处理，让AI基于工具调用结果生成执行计划
+                        continue;
+                    } else {
+                        // 如果不是工具调用，直接返回响应
+                        return this.createResponse(toolCallResponse);
+                    }
+                } else {
+                    this.log('info', '使用执行计划模式');
+                    
+                    // 分析并生成执行计划
+                    const result = await this.analyzeAndPlan(originalMessage, fullContext, onStream);
+                    
+                    if (!result) {
+                        return this.createResponse('❌ 无法理解您的需求，请重新描述');
+                    }
+                    
+                    // 处理不同类型的响应
+                    if (result.isToolCallResponse) {
+                        // 工具调用响应，添加到对话历史并继续
+                        conversationMessages.push({
+                            role: 'assistant',
+                            content: result.content
+                        });
+                        this.log('info', '收到工具调用响应，继续处理');
+                        continue;
+                    } else if (result.isTaskCompleted) {
+                        // 任务完成，返回完成消息
+                        this.log('info', '任务已完成');
+                        return this.createResponse(`✅ ${result.content}`);
+                    } else if (result.isDirectResponse) {
+                        // 直接响应，不需要执行计划
+                        this.log('info', '返回直接响应');
+                        return this.createResponse(result.content);
+                    } else if (result.steps && Array.isArray(result.steps)) {
+                        // 检查是否包含completeTask步骤
+                        const hasCompleteTask = result.steps.some(step => step.type === 'completeTask');
+                        
+                        if (hasCompleteTask) {
+                            // 包含完成任务步骤，执行计划并结束
+                            this.log('info', '执行计划包含完成任务步骤，开始执行并结束');
+                            return await this.executePlan(result, fullContext);
+                        } else {
+                            // 不包含完成任务步骤，执行当前计划并继续
+                            this.log('info', '执行部分计划，继续处理');
+                            
+                            // 执行当前计划
+                            await this.executePlan(result, fullContext);
+                            
+                            // 将执行结果添加到对话历史
+                            conversationMessages.push({
+                                role: 'assistant',
+                                content: `已执行计划: ${result.goal}。请继续下一步操作。`
+                            });
+                            
+                            // 添加用户消息，要求继续完成任务
+                            conversationMessages.push({
+                                role: 'user',
+                                content: '请继续完成剩余的任务，直到全部完成。'
+                            });
+                            
+                            // 继续下一轮处理
+                            continue;
+                        }
+                    } else {
+                        // 未知响应类型
+                        this.log('warn', '未知的响应类型', result);
+                        return this.createResponse('❌ 响应格式异常，请重试');
+                    }
+                }
             }
             
-            // 处理不同类型的响应
-            if (result.isToolCallResponse) {
-                // 工具调用响应，直接返回内容
-                this.log('info', '返回工具调用响应');
-                return this.createResponse(result.content);
-            } else if (result.isTaskCompleted) {
-                // 任务完成，返回完成消息
-                this.log('info', '任务已完成');
-                return this.createResponse(`✅ ${result.content}`);
-            } else if (result.isDirectResponse) {
-                // 直接响应，不需要执行计划
-                this.log('info', '返回直接响应');
-                return this.createResponse(result.content);
-            } else if (result.steps && Array.isArray(result.steps)) {
-                // 执行计划，需要执行
-                this.log('info', '执行计划模式');
-                return await this.executePlan(result, fullContext);
-            } else {
-                // 未知响应类型
-                this.log('warn', '未知的响应类型', result);
-                return this.createResponse('❌ 响应格式异常，请重试');
-            }
+            // 如果达到最大迭代次数，返回警告
+            this.log('warn', `达到最大迭代次数 ${maxIterations}，停止处理`);
+            return this.createResponse('⚠️ 处理过程过长，已自动停止。任务可能已部分完成，请检查结果或尝试简化您的请求。');
             
         } catch (error) {
             this.handleError(error, 'processMessage');

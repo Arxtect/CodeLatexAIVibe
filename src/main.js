@@ -5,6 +5,23 @@ import { LaTeXSyntaxPlugin } from './plugins/LaTeXSyntaxPlugin.js';
 import { LaTeXAutoCompletePlugin } from './plugins/LaTeXAutoCompletePlugin.js';
 import { ExamplePlugin } from './plugins/ExamplePlugin.js';
 
+// Configure Monaco Editor workers - disable to avoid worker loading issues
+self.MonacoEnvironment = {
+    getWorkerUrl: function (moduleId, label) {
+        // Return empty data URL to disable workers
+        return 'data:text/javascript;charset=utf-8,';
+    },
+    getWorker: function(moduleId, label) {
+        // Return a mock worker that does nothing
+        return {
+            postMessage: () => {},
+            terminate: () => {},
+            addEventListener: () => {},
+            removeEventListener: () => {}
+        };
+    }
+};
+
 // 全局变量
 window.ide = null;
 

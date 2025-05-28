@@ -38,11 +38,11 @@ export class FileSystem {
         }
     }
 
-    async readFile(filePath) {
+    async readFile(filePath, encoding = 'utf8') {
         this.ensureInitialized();
         
         return new Promise((resolve, reject) => {
-            this.fs.readFile(filePath, 'utf8', (err, data) => {
+            this.fs.readFile(filePath, encoding, (err, data) => {
                 if (err) {
                     reject(err);
                 } else {
@@ -52,7 +52,7 @@ export class FileSystem {
         });
     }
 
-    async writeFile(filePath, content) {
+    async writeFile(filePath, content, encoding = 'utf8') {
         this.ensureInitialized();
         
         return new Promise((resolve, reject) => {
@@ -65,7 +65,7 @@ export class FileSystem {
                         return;
                     }
                     
-                    this.fs.writeFile(filePath, content, 'utf8', (err) => {
+                    this.fs.writeFile(filePath, content, encoding, (err) => {
                         if (err) {
                             reject(err);
                         } else {
@@ -74,7 +74,7 @@ export class FileSystem {
                     });
                 });
             } else {
-                this.fs.writeFile(filePath, content, 'utf8', (err) => {
+                this.fs.writeFile(filePath, content, encoding, (err) => {
                     if (err) {
                         reject(err);
                     } else {
@@ -226,79 +226,23 @@ export class FileSystem {
                 }
                 
                 const fullPath = dirPath === '/' ? `/${file}` : `${dirPath}/${file}`;
+                const stats = await this.stat(fullPath);
                 
-                try {
-                    const stats = await this.stat(fullPath);
-                    
-                    if (stats.isDirectory()) {
-                        const subTree = await this.getFileTree(fullPath, visitedPaths, currentDepth + 1, maxDepth);
-                        tree.children.push(subTree);
-                    } else {
-                        tree.children.push({
-                            name: file,
-                            path: fullPath,
-                            type: 'file',
-                            size: stats.size
-                        });
-                    }
-                } catch (statError) {
-                    console.warn(`无法获取 ${fullPath} 的状态:`, statError);
+                if (stats.isDirectory()) {
+                    tree.children.push(await this.getFileTree(fullPath, visitedPaths, currentDepth + 1, maxDepth));
+                } else {
+                    tree.children.push({
+                        name: file,
+                        path: fullPath,
+                        type: 'file'
+                    });
                 }
             }
-        } catch (error) {
-            console.error('获取文件树失败:', error);
-            tree.error = error.message;
-        } finally {
-            // 扫描完成后从访问集合中移除
-            visitedPaths.delete(normalizedPath);
+        } catch (err) {
+            console.error(`读取目录失败: ${dirPath}`, err);
+            tree.warning = '读取目录失败';
         }
-
+        
         return tree;
     }
-
-    // 导出文件系统内容为 JSON
-    async exportToJSON() {
-        const tree = await this.getFileTree('/', new Set(), 0, 10);
-        const exportData = {
-            version: '1.0',
-            timestamp: new Date().toISOString(),
-            files: {}
-        };
-
-        const collectFiles = async (node) => {
-            if (node.type === 'file') {
-                try {
-                    const content = await this.readFile(node.path);
-                    exportData.files[node.path] = {
-                        content: content,
-                        size: node.size
-                    };
-                } catch (error) {
-                    console.error(`读取文件 ${node.path} 失败:`, error);
-                }
-            } else if (node.children) {
-                for (const child of node.children) {
-                    await collectFiles(child);
-                }
-            }
-        };
-
-        await collectFiles(tree);
-        return exportData;
-    }
-
-    // 从 JSON 导入文件系统内容
-    async importFromJSON(jsonData) {
-        if (!jsonData.files) {
-            throw new Error('无效的导入数据格式');
-        }
-
-        for (const [filePath, fileData] of Object.entries(jsonData.files)) {
-            try {
-                await this.writeFile(filePath, fileData.content);
-            } catch (error) {
-                console.error(`导入文件 ${filePath} 失败:`, error);
-            }
-        }
-    }
-} 
+}

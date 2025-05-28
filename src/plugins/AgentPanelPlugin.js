@@ -727,266 +727,313 @@ export class AgentPanelPlugin {
             
             /* 执行面板样式 */
             .execution-panel {
-                margin: 10px 0;
+                margin: 12px 0;
                 border: 1px solid var(--border-color, #e0e0e0);
                 border-radius: 8px;
-                background: var(--bg-secondary, #f8f9fa);
+                background: var(--bg-color, #ffffff);
                 overflow: hidden;
                 transition: all 0.3s ease;
             }
-
+            
             .execution-panel.collapsed .execution-content {
                 display: none;
             }
-
+            
+            .execution-panel.completed {
+                border-color: #28a745;
+            }
+            
             .execution-header {
-                padding: 12px 16px;
-                background: var(--primary-color, #007bff);
-                color: white;
-                cursor: pointer;
                 display: flex;
                 justify-content: space-between;
                 align-items: center;
+                padding: 12px 16px;
+                background: var(--header-bg, #f8f9fa);
+                border-bottom: 1px solid var(--border-color, #e0e0e0);
+                cursor: pointer;
                 user-select: none;
             }
-
+            
             .execution-header:hover {
-                background: var(--primary-hover, #0056b3);
+                background: var(--hover-bg, #e9ecef);
             }
-
+            
             .execution-header.completed {
-                background: var(--success-color, #28a745);
+                background: #d4edda;
+                border-bottom-color: #c3e6cb;
             }
-
+            
+            .execution-header.partial-success {
+                background: #fff3cd;
+                border-bottom-color: #ffeaa7;
+            }
+            
             .execution-title {
                 font-weight: 600;
-                font-size: 14px;
+                color: var(--text-color, #333);
             }
-
+            
             .execution-progress {
                 font-size: 12px;
-                opacity: 0.9;
+                color: var(--text-secondary, #666);
+                background: var(--bg-secondary, #f8f9fa);
+                padding: 2px 8px;
+                border-radius: 12px;
             }
-
+            
             .execution-toggle {
+                font-size: 12px;
+                color: var(--text-secondary, #666);
                 transition: transform 0.3s ease;
             }
-
+            
             .execution-panel.collapsed .execution-toggle {
                 transform: rotate(-90deg);
             }
-
+            
             .execution-content {
                 padding: 16px;
             }
-
+            
             .execution-progress-bar {
                 width: 100%;
                 height: 4px;
-                background: var(--border-color, #e0e0e0);
+                background: var(--bg-secondary, #f8f9fa);
                 border-radius: 2px;
                 margin-bottom: 16px;
                 overflow: hidden;
             }
-
+            
             .execution-progress-fill {
                 height: 100%;
-                background: var(--primary-color, #007bff);
-                transition: width 0.3s ease;
+                background: linear-gradient(90deg, #28a745, #20c997);
                 border-radius: 2px;
+                transition: width 0.3s ease;
             }
-
+            
+            .execution-steps {
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
+            }
+            
             .execution-step {
                 display: flex;
                 align-items: center;
-                padding: 8px 0;
-                border-bottom: 1px solid var(--border-light, #f0f0f0);
+                padding: 12px;
+                border: 1px solid var(--border-color, #e0e0e0);
+                border-radius: 6px;
+                background: var(--bg-color, #ffffff);
+                transition: all 0.3s ease;
             }
-
-            .execution-step:last-child {
-                border-bottom: none;
+            
+            .execution-step.executing {
+                border-color: #ffc107;
+                background: #fff3cd;
             }
-
+            
+            .execution-step.success {
+                border-color: #28a745;
+                background: #d4edda;
+            }
+            
+            .execution-step.error {
+                border-color: #dc3545;
+                background: #f8d7da;
+            }
+            
             .execution-step .step-status {
                 margin-right: 12px;
                 font-size: 16px;
-                min-width: 20px;
             }
-
-            .execution-step.executing .step-status {
-                animation: pulse 1.5s infinite;
+            
+            .execution-step .step-status.executing {
+                animation: spin 1s linear infinite;
             }
-
+            
+            @keyframes spin {
+                from { transform: rotate(0deg); }
+                to { transform: rotate(360deg); }
+            }
+            
             .execution-step .step-description {
                 flex: 1;
-                font-size: 14px;
+                font-weight: 500;
                 color: var(--text-color, #333);
             }
-
+            
+            .char-count {
+                font-size: 11px;
+                color: var(--text-secondary, #666);
+            }
+            
             /* 工具调用面板样式 */
             .tool-call-panel {
-                margin: 10px 0;
+                margin: 12px 0;
                 border: 1px solid var(--border-color, #e0e0e0);
                 border-radius: 8px;
-                background: var(--bg-secondary, #f8f9fa);
+                background: var(--bg-color, #ffffff);
                 overflow: hidden;
                 transition: all 0.3s ease;
             }
-
+            
             .tool-call-panel.collapsed .tool-call-content {
                 display: none;
             }
-
+            
             .tool-call-header {
-                padding: 12px 16px;
-                background: var(--warning-color, #fd7e14);
-                color: white;
-                cursor: pointer;
                 display: flex;
                 justify-content: space-between;
                 align-items: center;
+                padding: 12px 16px;
+                background: var(--header-bg, #f8f9fa);
+                border-bottom: 1px solid var(--border-color, #e0e0e0);
+                cursor: pointer;
                 user-select: none;
             }
-
+            
             .tool-call-header:hover {
-                background: var(--warning-hover, #e8681a);
+                background: var(--hover-bg, #e9ecef);
             }
-
+            
             .tool-call-header.completed {
-                background: var(--success-color, #28a745);
+                background: #d4edda;
+                border-bottom-color: #c3e6cb;
             }
-
+            
             .tool-call-title {
                 font-weight: 600;
-                font-size: 14px;
+                color: var(--text-color, #333);
             }
-
+            
             .tool-call-progress {
                 font-size: 12px;
-                opacity: 0.9;
+                color: var(--text-secondary, #666);
+                background: var(--bg-secondary, #f8f9fa);
+                padding: 2px 8px;
+                border-radius: 12px;
             }
-
+            
             .tool-call-toggle {
+                font-size: 12px;
+                color: var(--text-secondary, #666);
                 transition: transform 0.3s ease;
             }
-
+            
             .tool-call-panel.collapsed .tool-call-toggle {
                 transform: rotate(-90deg);
             }
-
+            
             .tool-call-content {
                 padding: 16px;
             }
-
+            
             .tool-call-progress-bar {
                 width: 100%;
                 height: 4px;
-                background: var(--border-color, #e0e0e0);
+                background: var(--bg-secondary, #f8f9fa);
                 border-radius: 2px;
                 margin-bottom: 16px;
                 overflow: hidden;
             }
-
+            
             .tool-call-progress-fill {
                 height: 100%;
-                background: var(--warning-color, #fd7e14);
-                transition: width 0.3s ease;
+                background: linear-gradient(90deg, #007bff, #0056b3);
                 border-radius: 2px;
+                transition: width 0.3s ease;
             }
-
-            .tool-call-step {
-                margin-bottom: 12px;
-                border: 1px solid var(--border-light, #f0f0f0);
-                border-radius: 6px;
-                background: white;
-                overflow: hidden;
-                transition: all 0.3s ease;
-            }
-
-            .tool-call-step:hover {
-                border-color: var(--border-color, #e0e0e0);
-                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            }
-
-            .tool-call-step > span {
+            
+            .tool-call-steps {
                 display: flex;
-                align-items: center;
-                padding: 12px 16px;
+                flex-direction: column;
+                gap: 8px;
+            }
+            
+            .tool-call-step {
+                display: flex;
+                flex-direction: column;
+                padding: 12px;
+                border: 1px solid var(--border-color, #e0e0e0);
+                border-radius: 6px;
+                background: var(--bg-color, #ffffff);
+                transition: all 0.3s ease;
                 cursor: pointer;
             }
-
+            
+            .tool-call-step:hover {
+                background: var(--hover-bg, #f8f9fa);
+            }
+            
+            .tool-call-step.executing {
+                border-color: #ffc107;
+                background: #fff3cd;
+            }
+            
+            .tool-call-step.success {
+                border-color: #28a745;
+                background: #d4edda;
+            }
+            
+            .tool-call-step.error {
+                border-color: #dc3545;
+                background: #f8d7da;
+            }
+            
             .tool-call-step .step-status {
-                margin-right: 12px;
-                font-size: 16px;
-                min-width: 20px;
+                margin-right: 8px;
+                font-size: 14px;
             }
-
-            .tool-call-step.executing .step-status {
-                animation: pulse 1.5s infinite;
-            }
-
+            
             .tool-call-step .step-description {
                 flex: 1;
-                font-size: 14px;
-                color: var(--text-color, #333);
                 font-weight: 500;
+                color: var(--text-color, #333);
             }
-
-            .tool-call-step.success {
-                border-color: var(--success-color, #28a745);
-                background: var(--success-bg, #f8fff9);
-            }
-
-            .tool-call-step.error {
-                border-color: var(--error-color, #dc3545);
-                background: var(--error-bg, #fff8f8);
-            }
-
+            
             .step-details {
-                padding: 0 16px 16px 16px;
-                border-top: 1px solid var(--border-light, #f0f0f0);
-                background: var(--bg-light, #fafafa);
+                margin-top: 12px;
+                padding-top: 12px;
+                border-top: 1px solid var(--border-color, #e0e0e0);
                 transition: all 0.3s ease;
             }
-
+            
             .step-details.collapsed {
                 display: none;
             }
-
-            .step-args, .step-result {
+            
+            .step-args,
+            .step-result {
                 margin-bottom: 12px;
             }
-
-            .step-args strong, .step-result strong {
+            
+            .step-args strong,
+            .step-result strong {
                 display: block;
                 margin-bottom: 6px;
-                color: var(--text-secondary, #666);
+                color: var(--text-color, #333);
                 font-size: 12px;
                 text-transform: uppercase;
                 letter-spacing: 0.5px;
             }
-
-            .step-args pre, .step-result pre {
-                background: var(--code-bg, #f1f3f4);
-                border: 1px solid var(--border-light, #e8eaed);
+            
+            .step-args pre,
+            .step-result pre {
+                background: var(--bg-secondary, #f8f9fa);
+                border: 1px solid var(--border-color, #e0e0e0);
                 border-radius: 4px;
-                padding: 12px;
-                font-size: 12px;
+                padding: 8px;
+                font-size: 11px;
                 line-height: 1.4;
                 overflow-x: auto;
                 margin: 0;
-                color: var(--code-color, #333);
-                font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+                white-space: pre-wrap;
+                word-wrap: break-word;
             }
-
+            
             .step-result pre {
                 max-height: 200px;
                 overflow-y: auto;
-            }
-
-            @keyframes pulse {
-                0%, 100% { opacity: 1; }
-                50% { opacity: 0.5; }
             }
         `;
         
@@ -1352,6 +1399,42 @@ export class AgentPanelPlugin {
     showExecutionPanel(actions) {
         const executionId = 'exec_' + Date.now();
         
+        // 构建步骤HTML
+        const stepsHtml = actions.map((action, index) => {
+            let paramsDisplay = '{}';
+            try {
+                if (action.params && typeof action.params === 'object') {
+                    paramsDisplay = JSON.stringify(action.params, null, 2);
+                } else if (action.data && typeof action.data === 'object') {
+                    paramsDisplay = JSON.stringify(action.data, null, 2);
+                }
+            } catch (error) {
+                console.error('解析操作参数失败:', error);
+                paramsDisplay = String(action.params || action.data || '{}');
+            }
+            
+            return `
+                <div class="execution-step" data-step="${index}">
+                    <div style="display: flex; align-items: center;">
+                        <span class="step-status">⏳</span>
+                        <span class="step-description">${this.getActionDescription(action)}</span>
+                    </div>
+                    <div class="step-details collapsed">
+                        <div class="step-args">
+                            <strong>操作类型:</strong>
+                            <pre>${action.type || '未知'}</pre>
+                            <strong>参数:</strong>
+                            <pre>${paramsDisplay}</pre>
+                        </div>
+                        <div class="step-result" style="display: none;">
+                            <strong>执行结果:</strong>
+                            <pre class="result-content"></pre>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+        
         // 创建执行面板
         const panel = document.createElement('div');
         panel.className = 'execution-panel';
@@ -1367,12 +1450,7 @@ export class AgentPanelPlugin {
                     <div class="execution-progress-fill" style="width: 0%"></div>
                 </div>
                 <div class="execution-steps">
-                    ${actions.map((action, index) => `
-                        <div class="execution-step" data-step="${index}">
-                            <span class="step-status">⏳</span>
-                            <span class="step-description">${this.getActionDescription(action)}</span>
-                        </div>
-                    `).join('')}
+                    ${stepsHtml}
                 </div>
             </div>
         `;
@@ -1389,6 +1467,17 @@ export class AgentPanelPlugin {
             messagesContainer.appendChild(panel);
             // 滚动到底部
             messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            
+            // 添加步骤点击事件
+            panel.querySelectorAll('.execution-step').forEach(step => {
+                step.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const details = step.querySelector('.step-details');
+                    if (details) {
+                        details.classList.toggle('collapsed');
+                    }
+                });
+            });
         } else {
             console.error('消息容器未找到');
         }
@@ -1399,7 +1488,7 @@ export class AgentPanelPlugin {
     /**
      * 更新执行步骤状态
      */
-    updateExecutionStep(executionId, stepIndex, status, description) {
+    updateExecutionStep(executionId, stepIndex, status, description, result = null) {
         const executionPanel = document.getElementById(executionId);
         if (!executionPanel) {
             console.warn(`执行面板未找到: ${executionId}`);
@@ -1418,19 +1507,23 @@ export class AgentPanelPlugin {
             return;
         }
         
-        // 更新状态图标和文本
+        // 更新状态图标和样式
+        step.classList.remove('executing', 'success', 'error');
         switch (status) {
             case 'executing':
                 statusElement.textContent = '⚡';
                 statusElement.className = 'step-status executing';
+                step.classList.add('executing');
                 break;
             case 'success':
                 statusElement.textContent = '✅';
                 statusElement.className = 'step-status success';
+                step.classList.add('success');
                 break;
             case 'error':
                 statusElement.textContent = '❌';
                 statusElement.className = 'step-status error';
+                step.classList.add('error');
                 break;
         }
         
@@ -1439,6 +1532,22 @@ export class AgentPanelPlugin {
             const descElement = step.querySelector('.step-description');
             if (descElement) {
                 descElement.textContent = description;
+            }
+        }
+        
+        // 显示执行结果
+        if (result !== null) {
+            const resultDiv = step.querySelector('.step-result');
+            const resultContent = step.querySelector('.result-content');
+            if (resultDiv && resultContent) {
+                try {
+                    const resultText = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
+                    resultContent.textContent = resultText;
+                    resultDiv.style.display = 'block';
+                } catch (error) {
+                    resultContent.textContent = String(result);
+                    resultDiv.style.display = 'block';
+                }
             }
         }
         
@@ -1511,25 +1620,71 @@ export class AgentPanelPlugin {
      * 获取操作描述
      */
     getActionDescription(action) {
-        switch (action.type) {
+        if (!action || !action.type) {
+            return '未知操作';
+        }
+        
+        const type = action.type;
+        const params = action.params || {};
+        
+        switch (type) {
             case 'create':
-                return `创建文件: ${action.data.filePath}`;
+                return `📝 创建文件: ${params.path || '未指定'} ${params.content ? `(${params.content.length} 字符)` : ''}`;
             case 'edit':
-                return `编辑文件: ${action.data.filePath}`;
+                if (params.operation === 'replace') {
+                    return `🔄 替换内容: ${params.path || '未指定'} (${params.search ? `查找: "${params.search.substring(0, 30)}..."` : '全文替换'})`;
+                } else if (params.operation === 'insert') {
+                    return `✏️ 插入内容: ${params.path || '未指定'} (行 ${params.line || '?'})`;
+                } else if (params.operation === 'append') {
+                    return `➕ 追加内容: ${params.path || '未指定'}`;
+                } else {
+                    return `✏️ 编辑文件: ${params.path || '未指定'}`;
+                }
             case 'delete':
-                return `删除文件: ${action.data.filePath}`;
+                return `🗑️ 删除文件: ${params.path || '未指定'}`;
             case 'move':
-                return `移动文件: ${action.data.sourcePath} → ${action.data.destinationPath}`;
+                return `📁 移动文件: ${params.from || '未指定'} → ${params.to || '未指定'}`;
             case 'search':
-                return `搜索: ${action.data.query} (在 ${action.data.filePath})`;
+                return `🔍 搜索文件: ${params.path || '所有文件'} (查找: "${params.query || '未指定'}")`;
             case 'compile':
-                return `编译: ${action.data.filePath}`;
+                return `🔨 编译 LaTeX: ${params.path || '当前文件'}`;
             case 'terminal':
-                return `执行命令: ${action.data.command}`;
+                return `⚡ 执行命令: ${params.command || '未指定'}`;
             case 'ui':
-                return `UI操作: ${action.data.action}`;
+                if (params.action === 'showMessage') {
+                    return `💬 显示消息: ${params.message || '未指定'}`;
+                } else if (params.action === 'openFile') {
+                    return `📂 打开文件: ${params.path || '未指定'}`;
+                } else if (params.action === 'closeFile') {
+                    return `❌ 关闭文件: ${params.path || '未指定'}`;
+                } else {
+                    return `🖥️ UI 操作: ${params.action || '未指定'}`;
+                }
+            case 'read':
+                return `📖 读取文件: ${params.path || '未指定'}`;
+            case 'write':
+                return `💾 写入文件: ${params.path || '未指定'} ${params.content ? `(${params.content.length} 字符)` : ''}`;
+            case 'open':
+                return `📂 打开文件: ${params.path || '未指定'}`;
+            case 'close':
+                return `❌ 关闭文件: ${params.path || '未指定'}`;
+            case 'save':
+                return `💾 保存文件: ${params.path || '未指定'}`;
+            case 'format':
+                return `🎨 格式化文件: ${params.path || '当前文件'}`;
+            case 'validate':
+                return `✅ 验证文件: ${params.path || '当前文件'}`;
+            case 'preview':
+                return `👁️ 预览文件: ${params.path || '当前文件'}`;
+            case 'backup':
+                return `💾 备份文件: ${params.path || '当前文件'}`;
+            case 'restore':
+                return `🔄 恢复文件: ${params.path || '未指定'}`;
             default:
-                return `执行操作: ${action.type}`;
+                // 对于未知的操作类型，尝试从参数中提取有用信息
+                const paramInfo = Object.keys(params).length > 0 ? 
+                    ` (${Object.keys(params).slice(0, 2).map(key => `${key}: ${String(params[key]).substring(0, 20)}`).join(', ')})` : '';
+                return `🔧 ${type}${paramInfo}`;
         }
     }
     
@@ -1582,6 +1737,25 @@ export class AgentPanelPlugin {
      * 格式化消息内容
      */
     formatMessage(content) {
+        // 确保内容是字符串
+        if (typeof content !== 'string') {
+            if (content === null || content === undefined) {
+                return '';
+            }
+            // 如果是对象，尝试提取有用的信息
+            if (typeof content === 'object') {
+                if (content.content) {
+                    content = content.content;
+                } else if (content.text) {
+                    content = content.text;
+                } else {
+                    content = JSON.stringify(content, null, 2);
+                }
+            } else {
+                content = String(content);
+            }
+        }
+        
         // 处理代码块
         content = content.replace(/```(\w+)?\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>');
         
@@ -3166,6 +3340,40 @@ export class AgentPanelPlugin {
         const panel = document.createElement('div');
         panel.className = 'tool-call-panel';
         panel.id = toolCallId;
+        
+        // 构建步骤HTML
+        const stepsHtml = toolCalls.map((toolCall, index) => {
+            let argsDisplay = '{}';
+            try {
+                const args = JSON.parse(toolCall.function.arguments);
+                argsDisplay = JSON.stringify(args, null, 2);
+            } catch (error) {
+                console.error('解析工具调用参数失败:', error);
+                argsDisplay = toolCall.function.arguments || '{}';
+            }
+            
+            return `
+                <div class="tool-call-step" data-step="${index}">
+                    <div style="display: flex; align-items: center;">
+                        <span class="step-status">⏳</span>
+                        <span class="step-description">${this.getToolCallDescription(toolCall)}</span>
+                    </div>
+                    <div class="step-details collapsed">
+                        <div class="step-args">
+                            <strong>函数名:</strong>
+                            <pre>${toolCall.function.name}</pre>
+                            <strong>参数:</strong>
+                            <pre>${argsDisplay}</pre>
+                        </div>
+                        <div class="step-result" style="display: none;">
+                            <strong>结果:</strong>
+                            <pre class="result-content"></pre>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+        
         panel.innerHTML = `
             <div class="tool-call-header" onclick="this.parentElement.classList.toggle('collapsed')">
                 <span class="tool-call-title">🔧 工具调用</span>
@@ -3177,22 +3385,7 @@ export class AgentPanelPlugin {
                     <div class="tool-call-progress-fill" style="width: 0%"></div>
                 </div>
                 <div class="tool-call-steps">
-                    ${toolCalls.map((toolCall, index) => `
-                        <div class="tool-call-step" data-step="${index}">
-                            <span class="step-status">⏳</span>
-                            <span class="step-description">${this.getToolCallDescription(toolCall)}</span>
-                            <div class="step-details collapsed">
-                                <div class="step-args">
-                                    <strong>参数:</strong>
-                                    <pre>${JSON.stringify(JSON.parse(toolCall.function.arguments), null, 2)}</pre>
-                                </div>
-                                <div class="step-result" style="display: none;">
-                                    <strong>结果:</strong>
-                                    <pre class="result-content"></pre>
-                                </div>
-                            </div>
-                        </div>
-                    `).join('')}
+                    ${stepsHtml}
                 </div>
             </div>
         `;
@@ -3203,6 +3396,17 @@ export class AgentPanelPlugin {
             messagesContainer.appendChild(panel);
             // 滚动到底部
             messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            
+            // 添加步骤点击事件
+            panel.querySelectorAll('.tool-call-step').forEach(step => {
+                step.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const details = step.querySelector('.step-details');
+                    if (details) {
+                        details.classList.toggle('collapsed');
+                    }
+                });
+            });
         } else {
             console.error('消息容器未找到');
         }
@@ -3286,13 +3490,26 @@ export class AgentPanelPlugin {
 
     getToolCallDescription(toolCall) {
         const functionName = toolCall.function.name;
-        const args = JSON.parse(toolCall.function.arguments);
+        let args;
+        
+        try {
+            args = JSON.parse(toolCall.function.arguments);
+        } catch (error) {
+            console.error('解析工具调用参数失败:', error);
+            args = {};
+        }
         
         switch (functionName) {
             case 'read_file':
-                return `📄 读取文件: ${args.file_path}`;
+                return `📄 读取文件: ${args.file_path || args.path || '未指定'}`;
+            case 'write_file':
+                return `💾 写入文件: ${args.file_path || args.path || '未指定'} (${args.content ? args.content.length + ' 字符' : '空内容'})`;
+            case 'create_file':
+                return `📝 创建文件: ${args.file_path || args.path || '未指定'}`;
+            case 'delete_file':
+                return `🗑️ 删除文件: ${args.file_path || args.path || '未指定'}`;
             case 'list_files':
-                return `📁 列出文件: ${args.directory_path || '/'} ${args.recursive ? '(递归)' : ''}`;
+                return `📁 列出文件: ${args.directory_path || args.path || '/'} ${args.recursive ? '(递归)' : ''}`;
             case 'get_file_structure':
                 return `🌳 获取文件结构 (深度: ${args.max_depth || 10})`;
             case 'get_current_file':
@@ -3302,15 +3519,40 @@ export class AgentPanelPlugin {
             case 'get_cursor_position':
                 return `📍 获取光标位置`;
             case 'search_in_files':
-                return `🔍 搜索: "${args.query}" ${args.file_pattern ? `(${args.file_pattern})` : ''}`;
+                return `🔍 搜索: "${args.query || args.search_term || '未指定'}" ${args.file_pattern ? `(${args.file_pattern})` : ''}`;
             case 'get_project_info':
                 return `📊 获取项目信息`;
             case 'get_open_tabs':
                 return `📑 获取打开的标签页`;
             case 'get_recent_changes':
                 return `📈 获取最近变更 (${args.limit || 10}条)`;
+            case 'execute_command':
+                return `⚡ 执行命令: ${args.command || '未指定'}`;
+            case 'open_file':
+                return `📂 打开文件: ${args.file_path || args.path || '未指定'}`;
+            case 'close_file':
+                return `❌ 关闭文件: ${args.file_path || args.path || '未指定'}`;
+            case 'save_file':
+                return `💾 保存文件: ${args.file_path || args.path || '未指定'}`;
+            case 'get_file_content':
+                return `📖 获取文件内容: ${args.file_path || args.path || '未指定'}`;
+            case 'set_cursor_position':
+                return `📍 设置光标位置: 行 ${args.line || '?'}, 列 ${args.column || '?'}`;
+            case 'insert_text':
+                return `✏️ 插入文本: "${args.text ? args.text.substring(0, 50) + (args.text.length > 50 ? '...' : '') : '空文本'}"`;
+            case 'replace_text':
+                return `🔄 替换文本: "${args.old_text || '未指定'}" → "${args.new_text || '未指定'}"`;
+            case 'get_workspace_info':
+                return `🏢 获取工作区信息`;
+            case 'compile_latex':
+                return `🔨 编译 LaTeX: ${args.file_path || args.path || '当前文件'}`;
+            case 'preview_pdf':
+                return `👁️ 预览 PDF: ${args.file_path || args.path || '当前文件'}`;
             default:
-                return `🔧 ${functionName}`;
+                // 对于未知的工具调用，尝试从参数中提取有用信息
+                const paramInfo = Object.keys(args).length > 0 ? 
+                    ` (${Object.keys(args).slice(0, 3).map(key => `${key}: ${String(args[key]).substring(0, 20)}`).join(', ')})` : '';
+                return `🔧 ${functionName}${paramInfo}`;
         }
     }
 } 

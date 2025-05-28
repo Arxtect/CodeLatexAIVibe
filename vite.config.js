@@ -7,9 +7,22 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
-    assetsDir: 'assets'
+    assetsDir: 'assets',
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          monaco: ['monaco-editor']
+        }
+      }
+    }
   },
   optimizeDeps: {
     include: ['monaco-editor', 'browserfs']
+  },
+  define: {
+    global: 'globalThis'
+  },
+  worker: {
+    format: 'es'
   }
 }) 

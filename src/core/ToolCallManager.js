@@ -34,6 +34,80 @@ export class ToolCallManager {
             handler: this.readFile.bind(this)
         });
 
+        this.registerTool('write_file', {
+            description: '创建或写入文件内容',
+            parameters: {
+                type: 'object',
+                properties: {
+                    file_path: {
+                        type: 'string',
+                        description: '要写入的文件路径（相对于项目根目录）'
+                    },
+                    content: {
+                        type: 'string',
+                        description: '要写入的文件内容'
+                    },
+                    encoding: {
+                        type: 'string',
+                        description: '文件编码，默认为utf8',
+                        default: 'utf8'
+                    }
+                },
+                required: ['file_path', 'content']
+            },
+            handler: this.writeFile.bind(this)
+        });
+
+        this.registerTool('delete_file', {
+            description: '删除指定文件',
+            parameters: {
+                type: 'object',
+                properties: {
+                    file_path: {
+                        type: 'string',
+                        description: '要删除的文件路径（相对于项目根目录）'
+                    }
+                },
+                required: ['file_path']
+            },
+            handler: this.deleteFile.bind(this)
+        });
+
+        this.registerTool('create_directory', {
+            description: '创建目录',
+            parameters: {
+                type: 'object',
+                properties: {
+                    directory_path: {
+                        type: 'string',
+                        description: '要创建的目录路径（相对于项目根目录）'
+                    }
+                },
+                required: ['directory_path']
+            },
+            handler: this.createDirectory.bind(this)
+        });
+
+        this.registerTool('delete_directory', {
+            description: '删除目录（包括其中的所有文件）',
+            parameters: {
+                type: 'object',
+                properties: {
+                    directory_path: {
+                        type: 'string',
+                        description: '要删除的目录路径（相对于项目根目录）'
+                    },
+                    recursive: {
+                        type: 'boolean',
+                        description: '是否递归删除子目录，默认为true',
+                        default: true
+                    }
+                },
+                required: ['directory_path']
+            },
+            handler: this.deleteDirectory.bind(this)
+        });
+
         this.registerTool('list_files', {
             description: '列出指定目录下的文件和文件夹',
             parameters: {
@@ -219,15 +293,35 @@ export class ToolCallManager {
     async executeToolCall(toolCall) {
         const { name, arguments: args } = toolCall.function;
         
+        console.log('executeToolCall 调试信息:', {
+            name,
+            args,
+            argsType: typeof args,
+            toolCall: toolCall
+        });
+        
         if (!this.tools.has(name)) {
             throw new Error(`未知的工具: ${name}`);
         }
 
         const tool = this.tools.get(name);
         
+        // 解析参数（如果是字符串）
+        let parsedArgs = args;
+        if (typeof args === 'string') {
+            try {
+                parsedArgs = JSON.parse(args);
+            } catch (error) {
+                console.error('解析工具调用参数失败:', error, args);
+                throw new Error(`工具调用参数解析失败: ${error.message}`);
+            }
+        }
+        
+        console.log('解析后的参数:', parsedArgs);
+        
         try {
-            console.log(`执行工具调用: ${name}`, args);
-            const result = await tool.handler(args);
+            console.log(`执行工具调用: ${name}`, parsedArgs);
+            const result = await tool.handler(parsedArgs);
             console.log(`工具调用完成: ${name}`);
             return result;
         } catch (error) {
@@ -240,22 +334,40 @@ export class ToolCallManager {
     async readFile(args) {
         const { file_path, encoding = 'utf8' } = args;
         
+        // 验证参数
+        if (!file_path || typeof file_path !== 'string') {
+            console.error('readFile: file_path 参数无效', { file_path, args });
+            return {
+                success: false,
+                error: `文件路径无效: ${file_path}`,
+                file_path: file_path || 'undefined'
+            };
+        }
+        
         try {
+            console.log(`读取文件: ${file_path}`);
             const content = await this.ide.fileSystem.readFile(file_path, encoding);
+            
+            // 检查内容是否为 undefined 或 null
+            if (content === undefined || content === null) {
+                throw new Error(`文件内容为空或无法读取: ${file_path}`);
+            }
+            
             const stats = await this.ide.fileSystem.stat(file_path);
             
             return {
                 success: true,
                 file_path,
-                content,
-                size: content.length,
+                content: String(content), // 确保内容是字符串
+                size: String(content).length,
                 encoding,
-                last_modified: stats.mtime || new Date().toISOString()
+                last_modified: stats.mtime ? stats.mtime.toISOString() : new Date().toISOString()
             };
         } catch (error) {
+            console.error(`读取文件失败: ${file_path}`, error);
             return {
                 success: false,
-                error: error.message,
+                error: error.message || '未知错误',
                 file_path
             };
         }
@@ -295,37 +407,46 @@ export class ToolCallManager {
             const entries = await this.ide.fileSystem.readdir(dirPath);
             
             for (const entry of entries) {
+                // 确保 entry 是字符串
+                if (!entry || typeof entry !== 'string') continue;
                 if (entry.startsWith('.')) continue; // 跳过隐藏文件
                 
                 const fullPath = dirPath === '/' ? `/${entry}` : `${dirPath}/${entry}`;
-                const stats = await this.ide.fileSystem.stat(fullPath);
                 
-                if (stats.isDirectory()) {
-                    files.push({
-                        name: entry,
-                        path: fullPath,
-                        type: 'directory',
-                        size: 0
-                    });
+                try {
+                    const stats = await this.ide.fileSystem.stat(fullPath);
                     
-                    if (recursive) {
-                        await this.scanDirectory(fullPath, files, recursive, fileTypes, depth + 1, maxDepth);
+                    if (stats.isDirectory()) {
+                        files.push({
+                            name: entry,
+                            path: fullPath,
+                            type: 'directory',
+                            size: 0
+                        });
+                        
+                        if (recursive) {
+                            await this.scanDirectory(fullPath, files, recursive, fileTypes, depth + 1, maxDepth);
+                        }
+                    } else {
+                        // 安全地获取文件扩展名
+                        const parts = entry.split('.');
+                        const extension = parts.length > 1 ? parts.pop().toLowerCase() : '';
+                        
+                        // 文件类型过滤
+                        if (fileTypes && fileTypes.length > 0 && !fileTypes.includes(extension)) {
+                            continue;
+                        }
+                        
+                        files.push({
+                            name: entry,
+                            path: fullPath,
+                            type: 'file',
+                            size: stats.size || 0,
+                            extension
+                        });
                     }
-                } else {
-                    const extension = entry.split('.').pop().toLowerCase();
-                    
-                    // 文件类型过滤
-                    if (fileTypes && fileTypes.length > 0 && !fileTypes.includes(extension)) {
-                        continue;
-                    }
-                    
-                    files.push({
-                        name: entry,
-                        path: fullPath,
-                        type: 'file',
-                        size: stats.size || 0,
-                        extension
-                    });
+                } catch (statError) {
+                    console.warn(`获取文件状态失败: ${fullPath}`, statError);
                 }
             }
         } catch (error) {
@@ -366,24 +487,35 @@ export class ToolCallManager {
             const entries = await this.ide.fileSystem.readdir(dirPath);
             
             for (const entry of entries) {
+                // 确保 entry 是字符串
+                if (!entry || typeof entry !== 'string') continue;
                 if (!includeHidden && entry.startsWith('.')) continue;
                 
                 const fullPath = dirPath === '/' ? `/${entry}` : `${dirPath}/${entry}`;
-                const stats = await this.ide.fileSystem.stat(fullPath);
                 
-                if (stats.isDirectory()) {
-                    const subtree = await this.buildFileTree(fullPath, maxDepth, includeHidden, depth + 1);
-                    if (subtree) {
-                        tree.children.push(subtree);
+                try {
+                    const stats = await this.ide.fileSystem.stat(fullPath);
+                    
+                    if (stats.isDirectory()) {
+                        const subtree = await this.buildFileTree(fullPath, maxDepth, includeHidden, depth + 1);
+                        if (subtree) {
+                            tree.children.push(subtree);
+                        }
+                    } else {
+                        // 安全地获取文件扩展名
+                        const parts = entry.split('.');
+                        const extension = parts.length > 1 ? parts.pop().toLowerCase() : '';
+                        
+                        tree.children.push({
+                            name: entry,
+                            path: fullPath,
+                            type: 'file',
+                            size: stats.size || 0,
+                            extension
+                        });
                     }
-                } else {
-                    tree.children.push({
-                        name: entry,
-                        path: fullPath,
-                        type: 'file',
-                        size: stats.size || 0,
-                        extension: entry.split('.').pop().toLowerCase()
-                    });
+                } catch (statError) {
+                    console.warn(`获取文件状态失败: ${fullPath}`, statError);
                 }
             }
         } catch (error) {
@@ -583,16 +715,169 @@ export class ToolCallManager {
         };
     }
 
-    getRecentChanges(args) {
+    async getRecentChanges(args) {
         const { limit = 10 } = args;
         
-        // 这里可以集成版本管理系统的历史记录
-        // 目前返回模拟数据
-        return {
-            success: true,
-            changes: [],
-            limit,
-            message: '版本历史功能待实现'
-        };
+        try {
+            // 这里可以实现获取最近变更的逻辑
+            // 目前返回模拟数据
+            return {
+                success: true,
+                changes: [
+                    {
+                        file_path: '/main.tex',
+                        action: 'modified',
+                        timestamp: new Date().toISOString(),
+                        description: '修改了主文档'
+                    }
+                ],
+                total: 1
+            };
+        } catch (error) {
+            return {
+                success: false,
+                error: error.message
+            };
+        }
+    }
+
+    // 新增的文件操作工具
+    async writeFile(args) {
+        const { file_path, content, encoding = 'utf8' } = args;
+        
+        try {
+            await this.ide.fileSystem.writeFile(file_path, content, encoding);
+            
+            return {
+                success: true,
+                file_path,
+                content_length: content.length,
+                encoding,
+                message: `文件 ${file_path} 创建/写入成功`
+            };
+        } catch (error) {
+            return {
+                success: false,
+                error: error.message,
+                file_path
+            };
+        }
+    }
+
+    async deleteFile(args) {
+        const { file_path } = args;
+        
+        try {
+            // 检查文件是否存在
+            const stats = await this.ide.fileSystem.stat(file_path);
+            if (stats.isDirectory()) {
+                throw new Error('指定路径是目录，请使用 delete_directory 工具');
+            }
+            
+            await this.ide.fileSystem.unlink(file_path);
+            
+            return {
+                success: true,
+                file_path,
+                message: `文件 ${file_path} 删除成功`
+            };
+        } catch (error) {
+            return {
+                success: false,
+                error: error.message,
+                file_path
+            };
+        }
+    }
+
+    async createDirectory(args) {
+        const { directory_path } = args;
+        
+        try {
+            // 检查目录是否已存在
+            try {
+                const stats = await this.ide.fileSystem.stat(directory_path);
+                if (stats.isDirectory()) {
+                    return {
+                        success: true,
+                        directory_path,
+                        message: `目录 ${directory_path} 已存在`
+                    };
+                }
+            } catch (error) {
+                // 目录不存在，继续创建
+            }
+            
+            await this.ide.fileSystem.mkdir(directory_path);
+            
+            return {
+                success: true,
+                directory_path,
+                message: `目录 ${directory_path} 创建成功`
+            };
+        } catch (error) {
+            return {
+                success: false,
+                error: error.message,
+                directory_path
+            };
+        }
+    }
+
+    async deleteDirectory(args) {
+        const { directory_path, recursive = true } = args;
+        
+        try {
+            // 检查目录是否存在
+            const stats = await this.ide.fileSystem.stat(directory_path);
+            if (!stats.isDirectory()) {
+                throw new Error('指定路径不是目录，请使用 delete_file 工具');
+            }
+            
+            if (recursive) {
+                // 递归删除目录及其内容
+                await this.deleteDirectoryRecursive(directory_path);
+            } else {
+                // 只删除空目录
+                await this.ide.fileSystem.rmdir(directory_path);
+            }
+            
+            return {
+                success: true,
+                directory_path,
+                recursive,
+                message: `目录 ${directory_path} 删除成功`
+            };
+        } catch (error) {
+            return {
+                success: false,
+                error: error.message,
+                directory_path
+            };
+        }
+    }
+
+    async deleteDirectoryRecursive(dirPath) {
+        try {
+            const entries = await this.ide.fileSystem.readdir(dirPath);
+            
+            // 删除目录中的所有文件和子目录
+            for (const entry of entries) {
+                const fullPath = dirPath === '/' ? `/${entry}` : `${dirPath}/${entry}`;
+                const stats = await this.ide.fileSystem.stat(fullPath);
+                
+                if (stats.isDirectory()) {
+                    await this.deleteDirectoryRecursive(fullPath);
+                } else {
+                    await this.ide.fileSystem.unlink(fullPath);
+                }
+            }
+            
+            // 删除空目录
+            await this.ide.fileSystem.rmdir(dirPath);
+        } catch (error) {
+            console.warn(`删除目录失败: ${dirPath}`, error);
+            throw error;
+        }
     }
 } 
