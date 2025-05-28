@@ -186,6 +186,17 @@ export class PluginManager {
         });
     }
 
+    /**
+     * 为插件提供注册右键菜单项的接口
+     */
+    registerContextMenuAction(actionConfig) {
+        if (window.ide && window.ide.registerContextMenuAction) {
+            window.ide.registerContextMenuAction(actionConfig);
+        } else {
+            console.warn('IDE实例或registerContextMenuAction方法不可用');
+        }
+    }
+
     // 获取语法高亮提供者
     getSyntaxHighlightProviders(language) {
         return this.getAllPlugins().filter(plugin => 

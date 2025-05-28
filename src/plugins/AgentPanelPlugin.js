@@ -96,6 +96,7 @@ export class AgentPanelPlugin {
                         <div class="context-header">
                             <span class="context-title">📎 上下文</span>
                             <div class="context-controls">
+                                <button class="btn-context" id="add-file-btn" title="添加文件到上下文">📄 文件</button>
                                 <button class="btn-context" id="clear-context-btn" title="清空上下文">🗑️ 清空</button>
                             </div>
                         </div>
@@ -740,6 +741,10 @@ export class AgentPanelPlugin {
         });
         
         // 上下文管理按钮
+        this.panel.querySelector('#add-file-btn').addEventListener('click', () => {
+            this.showFileSelector();
+        });
+        
         this.panel.querySelector('#clear-context-btn').addEventListener('click', () => {
             this.clearContext();
         });
@@ -752,6 +757,7 @@ export class AgentPanelPlugin {
      * 注册全局函数
      */
     registerGlobalFunctions() {
+        console.log('注册Agent面板全局函数...');
         window.toggleAgentPanel = () => this.toggle();
         window.showAgentPanel = () => this.show();
         window.hideAgentPanel = () => this.hide();
@@ -760,7 +766,15 @@ export class AgentPanelPlugin {
         // 添加全局上下文管理函数
         window.addSelectionToContext = () => this.addSelectionToContext();
         window.addCurrentFileToContext = () => this.addCurrentFileToContext();
-        window.addFolderToContext = (folderPath) => this.addFolderToContextByPath(folderPath);
+        window.addFileToContextByPath = (filePath) => this.addFileToContextByPath(filePath);
+        
+        console.log('全局函数注册完成:', {
+            toggleAgentPanel: !!window.toggleAgentPanel,
+            agentPanel: !!window.agentPanel,
+            addSelectionToContext: !!window.addSelectionToContext,
+            addCurrentFileToContext: !!window.addCurrentFileToContext,
+            addFileToContextByPath: !!window.addFileToContextByPath
+        });
     }
     
     /**
@@ -1350,87 +1364,22 @@ export class AgentPanelPlugin {
     }
     
     /**
-     * 显示文件/文件夹选择器
+     * 显示文件选择器（文件树结构）
      */
     async showFileSelector() {
         try {
-            const files = await this.getProjectFiles();
+            const fileTree = await this.buildFileTree();
             
-            if (files.length === 0) {
-                alert('项目中没有文件或文件夹');
+            if (!fileTree || Object.keys(fileTree).length === 0) {
+                alert('项目中没有文件');
                 return;
             }
             
-            // 分类文件和文件夹
-            const fileList = files.filter(f => f.type === 'file');
-            const folderList = files.filter(f => f.type === 'directory');
-            
-            // 合并列表，文件夹在前
-            const allItems = [
-                ...folderList.map(f => ({ ...f, displayType: '📁 文件夹' })),
-                ...fileList.map(f => ({ ...f, displayType: '📄 文件' }))
-            ];
-            
-            const selectedItem = await this.showSelectionModal('选择文件或文件夹', allItems, 'file-folder');
-            if (selectedItem) {
-                if (selectedItem.type === 'directory') {
-                    // 添加文件夹
-                    const files = await this.scanFolder(selectedItem.path, new Set(), 0, 8);
-                    const fileList = files.map(f => f.path).join('\n');
-                    
-                    this.addContextItem({
-                        type: 'folder',
-                        name: selectedItem.path,
-                        content: fileList,
-                        preview: `包含 ${files.length} 个文件`,
-                        files: files
-                    });
-                } else {
-                    // 添加文件
-                    const content = await window.ide.fileSystem.readFile(selectedItem.path, 'utf8');
-                    
-                    // 获取性能设置
-                    const performanceSettings = window.ide?.settingsManager?.get('performance') || {};
-                    const maxFileSize = performanceSettings.contextFileLimit || 1024 * 1024; // 1MB 默认
-                    const previewLength = performanceSettings.previewLength || 2000;
-                    
-                    // 检查文件大小
-                    if (content.length > maxFileSize) {
-                        const shouldContinue = confirm(
-                            `文件 "${selectedItem.path}" 较大 (${Math.round(content.length / 1024)}KB)，` +
-                            `超过设置的限制 (${Math.round(maxFileSize / 1024)}KB)。\n\n` +
-                            `是否继续添加？建议：选择文件的关键部分而不是整个文件。`
-                        );
-                        if (!shouldContinue) {
-                            return;
-                        }
-                    }
-                    
-                    // 创建上下文项目
-                    const contextItem = {
-                        type: 'file',
-                        name: selectedItem.path,
-                        content: content,
-                        size: content.length,
-                        truncated: false
-                    };
-                    
-                    // 如果启用分段加载且内容较大，使用分段显示
-                    const enableChunkedLoading = performanceSettings.enableChunkedLoading !== false;
-                    if (enableChunkedLoading && content.length > previewLength) {
-                        const chunkedData = this.createChunkedContent(contextItem, performanceSettings);
-                        contextItem.chunkedData = chunkedData;
-                        contextItem.preview = chunkedData.displayContent;
-                        contextItem.truncated = chunkedData.hasMore;
-                    } else {
-                        // 使用简单截断
-                        contextItem.preview = content.length > previewLength 
-                            ? content.substring(0, previewLength) + `\n\n... (文件较大，已截断，总长度: ${content.length} 字符)`
-                            : content;
-                        contextItem.truncated = content.length > previewLength;
-                    }
-                    
-                    this.addContextItem(contextItem);
+            const selectedFiles = await this.showFileTreeModal('选择文件', fileTree);
+            if (selectedFiles && selectedFiles.length > 0) {
+                // 批量添加选中的文件
+                for (const filePath of selectedFiles) {
+                    await this.addFileToContextByPath(filePath);
                 }
                 
                 if (!this.isVisible) {
@@ -1438,61 +1387,72 @@ export class AgentPanelPlugin {
                 }
             }
         } catch (error) {
-            console.error('显示文件/文件夹选择器失败:', error);
-            alert('显示文件/文件夹选择器失败: ' + error.message);
+            console.error('显示文件选择器失败:', error);
+            alert('显示文件选择器失败: ' + error.message);
         }
     }
-    
+
     /**
-     * 显示文件夹选择器
+     * 构建文件树结构
      */
-    async showFolderSelector() {
-        try {
-            const files = await this.getProjectFiles();
-            const folderList = files.filter(f => f.type === 'directory');
+    async buildFileTree() {
+        const files = await this.getProjectFiles();
+        const tree = {};
+        
+        // 构建树结构
+        files.forEach(file => {
+            if (file.type !== 'file') return; // 只处理文件
             
-            if (folderList.length === 0) {
-                alert('项目中没有文件夹');
-                return;
-            }
+            const parts = file.path.split('/').filter(p => p);
+            let current = tree;
             
-            const selectedFolder = await this.showSelectionModal('选择文件夹', folderList, 'folder');
-            if (selectedFolder) {
-                const files = await this.scanFolder(selectedFolder.path, new Set(), 0, 8);
-                const fileList = files.map(f => f.path).join('\n');
-                
-                this.addContextItem({
-                    type: 'folder',
-                    name: selectedFolder.path,
-                    content: fileList,
-                    preview: `包含 ${files.length} 个文件`,
-                    files: files
-                });
-                
-                if (!this.isVisible) {
-                    this.show();
+            // 构建路径
+            for (let i = 0; i < parts.length - 1; i++) {
+                const part = parts[i];
+                if (!current[part]) {
+                    current[part] = { type: 'directory', children: {}, path: '/' + parts.slice(0, i + 1).join('/') };
                 }
+                current = current[part].children;
             }
-        } catch (error) {
-            console.error('显示文件夹选择器失败:', error);
-            alert('显示文件夹选择器失败: ' + error.message);
-        }
+            
+            // 添加文件
+            const fileName = parts[parts.length - 1];
+            current[fileName] = { 
+                type: 'file', 
+                path: file.path,
+                size: file.size || 0
+            };
+        });
+        
+        return tree;
     }
-    
+
     /**
-     * 获取项目文件列表
+     * 获取项目中的所有文件
      */
     async getProjectFiles() {
         const files = [];
         const visitedPaths = new Set(); // 防止循环引用
-        await this.scanDirectoryForFiles('/', files, visitedPaths, 0, 10); // 最大深度10
-        return files;
+        
+        try {
+            if (!window.ide || !window.ide.fileSystem) {
+                console.warn('文件系统未初始化');
+                return [];
+            }
+            
+            // 递归获取所有文件，添加深度限制
+            await this.scanDirectory('/', files, visitedPaths, 0, 10);
+            return files.sort((a, b) => a.path.localeCompare(b.path));
+        } catch (error) {
+            console.error('扫描文件失败:', error);
+            return [];
+        }
     }
-    
+
     /**
-     * 递归扫描目录获取文件列表
+     * 扫描目录（用于文件树构建）
      */
-    async scanDirectoryForFiles(dirPath, files, visitedPaths = new Set(), currentDepth = 0, maxDepth = 10) {
+    async scanDirectory(dirPath, files, visitedPaths = new Set(), currentDepth = 0, maxDepth = 10) {
         // 防止无限递归
         if (currentDepth >= maxDepth) {
             console.warn(`达到最大扫描深度 ${maxDepth}，停止扫描: ${dirPath}`);
@@ -1500,7 +1460,7 @@ export class AgentPanelPlugin {
         }
         
         // 防止循环引用
-        const normalizedPath = dirPath.replace(/\/+/g, '/'); // 规范化路径
+        const normalizedPath = dirPath.replace(/\/+/g, '/');
         if (visitedPaths.has(normalizedPath)) {
             console.warn(`检测到循环引用，跳过: ${dirPath}`);
             return;
@@ -1524,16 +1484,20 @@ export class AgentPanelPlugin {
                     if (stats.isDirectory()) {
                         files.push({
                             path: fullPath,
+                            type: 'directory',
                             name: entry,
-                            type: 'directory'
+                            size: 0
                         });
+                        
                         // 递归扫描子目录，增加深度
-                        await this.scanDirectoryForFiles(fullPath, files, visitedPaths, currentDepth + 1, maxDepth);
+                        await this.scanDirectory(fullPath, files, visitedPaths, currentDepth + 1, maxDepth);
                     } else {
                         files.push({
                             path: fullPath,
+                            type: 'file',
                             name: entry,
-                            type: 'file'
+                            size: stats.size || 0,
+                            extension: this.getFileExtension(entry)
                         });
                     }
                 } catch (statError) {
@@ -1543,56 +1507,159 @@ export class AgentPanelPlugin {
         } catch (error) {
             console.warn(`无法读取目录 ${dirPath}:`, error);
         } finally {
-            // 扫描完成后从访问集合中移除，允许其他路径访问
+            // 扫描完成后从访问集合中移除
             visitedPaths.delete(normalizedPath);
         }
     }
-    
+
     /**
-     * 显示选择模态框
+     * 获取文件扩展名
      */
-    async showSelectionModal(title, items, type) {
+    getFileExtension(filename) {
+        const lastDot = filename.lastIndexOf('.');
+        return lastDot > 0 ? filename.substring(lastDot + 1) : '';
+    }
+
+    /**
+     * 显示文件树选择模态框
+     */
+    async showFileTreeModal(title, fileTree) {
         return new Promise((resolve) => {
             const modal = document.createElement('div');
-            modal.className = 'file-selector-modal';
+            modal.className = 'file-tree-modal';
             modal.innerHTML = `
                 <div class="modal-overlay">
                     <div class="modal-content">
                         <div class="modal-header">
                             <h3>${title}</h3>
-                            <button class="modal-close">×</button>
+                            <div class="modal-header-actions">
+                                <button class="btn-select-all" id="select-all-btn">全选</button>
+                                <button class="btn-clear-all" id="clear-all-btn">清空</button>
+                                <button class="modal-close">×</button>
+                            </div>
                         </div>
                         <div class="modal-body">
-                            <div class="file-list">
-                                ${items.map(item => {
-                                    const icon = item.type === 'directory' ? '📁' : '📄';
-                                    const typeLabel = item.displayType || (item.type === 'directory' ? '文件夹' : '文件');
-                                    return `
-                                        <div class="file-list-item" data-path="${item.path}">
-                                            <span class="file-icon">${icon}</span>
-                                            <div class="file-info">
-                                                <span class="file-path">${item.path}</span>
-                                                <span class="file-type">${typeLabel}</span>
-                                            </div>
-                                        </div>
-                                    `;
-                                }).join('')}
+                            <div class="file-tree-container">
+                                <div class="file-tree" id="file-tree">
+                                    ${this.renderFileTree(fileTree)}
+                                </div>
                             </div>
                         </div>
                         <div class="modal-footer">
-                            <button type="button" class="btn-cancel">取消</button>
+                            <div class="selected-count">
+                                已选择 <span id="selected-count">0</span> 个文件
+                            </div>
+                            <div class="modal-actions">
+                                <button class="btn-cancel">取消</button>
+                                <button class="btn-confirm" id="confirm-btn">确定</button>
+                            </div>
                         </div>
                     </div>
                 </div>
             `;
             
             // 添加样式
-            this.addFileSelectorStyles();
+            this.addFileTreeStyles();
             
             // 事件处理
+            const fileTreeElement = modal.querySelector('#file-tree');
+            const selectedCountElement = modal.querySelector('#selected-count');
+            const confirmBtn = modal.querySelector('#confirm-btn');
+            const selectAllBtn = modal.querySelector('#select-all-btn');
+            const clearAllBtn = modal.querySelector('#clear-all-btn');
             const closeBtn = modal.querySelector('.modal-close');
             const cancelBtn = modal.querySelector('.btn-cancel');
             
+            let selectedFiles = new Set();
+            
+            // 更新选中计数
+            const updateSelectedCount = () => {
+                selectedCountElement.textContent = selectedFiles.size;
+                confirmBtn.disabled = selectedFiles.size === 0;
+            };
+            
+            // 文件树点击事件
+            fileTreeElement.addEventListener('click', (e) => {
+                const item = e.target.closest('.tree-item');
+                if (!item) return;
+                
+                const filePath = item.dataset.path;
+                const isFile = item.dataset.type === 'file';
+                const toggle = item.querySelector('.tree-toggle');
+                
+                // 如果点击的是切换按钮
+                if (e.target === toggle) {
+                    e.preventDefault();
+                    
+                    if (!isFile && toggle) {
+                        // 文件夹：切换展开/折叠
+                        const children = item.querySelector('.tree-children');
+                        
+                        if (children) {
+                            const isExpanded = toggle.dataset.expanded === 'true';
+                            
+                            if (isExpanded) {
+                                // 折叠
+                                children.style.display = 'none';
+                                toggle.textContent = '▶';
+                                toggle.dataset.expanded = 'false';
+                                item.classList.remove('expanded');
+                            } else {
+                                // 展开
+                                children.style.display = 'block';
+                                toggle.textContent = '▼';
+                                toggle.dataset.expanded = 'true';
+                                item.classList.add('expanded');
+                            }
+                        }
+                    }
+                } else if (isFile) {
+                    // 文件：切换选中状态（点击整行）
+                    e.preventDefault();
+                    
+                    if (selectedFiles.has(filePath)) {
+                        selectedFiles.delete(filePath);
+                        item.classList.remove('selected');
+                    } else {
+                        selectedFiles.add(filePath);
+                        item.classList.add('selected');
+                    }
+                    updateSelectedCount();
+                } else if (!isFile) {
+                    // 文件夹：点击标签也可以展开/折叠
+                    if (toggle) {
+                        toggle.click();
+                    }
+                }
+            });
+            
+            // 全选按钮
+            selectAllBtn.addEventListener('click', () => {
+                const fileItems = modal.querySelectorAll('.tree-item[data-type="file"]');
+                selectedFiles.clear();
+                
+                fileItems.forEach(item => {
+                    const filePath = item.dataset.path;
+                    selectedFiles.add(filePath);
+                    item.classList.add('selected');
+                });
+                
+                updateSelectedCount();
+            });
+            
+            // 清空按钮
+            clearAllBtn.addEventListener('click', () => {
+                const fileItems = modal.querySelectorAll('.tree-item[data-type="file"]');
+                selectedFiles.clear();
+                
+                fileItems.forEach(item => {
+                    item.classList.remove('selected');
+                });
+                
+                updateSelectedCount();
+            });
+            
+            // 关闭模态框
             const closeModal = () => {
                 modal.remove();
                 resolve(null);
@@ -1601,167 +1668,96 @@ export class AgentPanelPlugin {
             closeBtn.addEventListener('click', closeModal);
             cancelBtn.addEventListener('click', closeModal);
             
-            // 文件项点击事件
-            modal.querySelectorAll('.file-list-item').forEach(item => {
-                item.addEventListener('click', () => {
-                    const path = item.dataset.path;
-                    const selectedItem = items.find(i => i.path === path);
-                    modal.remove();
-                    resolve(selectedItem);
-                });
+            // 确定按钮
+            confirmBtn.addEventListener('click', () => {
+                modal.remove();
+                resolve(Array.from(selectedFiles));
             });
             
-            // 点击遮罩关闭
-            modal.querySelector('.modal-overlay').addEventListener('click', (e) => {
-                if (e.target === e.currentTarget) {
-                    closeModal();
-                }
-            });
+            // 初始化
+            updateSelectedCount();
             
+            // 添加到页面
             document.body.appendChild(modal);
         });
     }
-    
+
     /**
-     * 添加文件选择器样式
+     * 渲染文件树
      */
-    addFileSelectorStyles() {
-        if (document.getElementById('file-selector-styles')) return;
+    renderFileTree(tree, level = 0) {
+        let html = '';
         
-        const styles = document.createElement('style');
-        styles.id = 'file-selector-styles';
-        styles.textContent = `
-            .file-selector-modal {
-                position: fixed;
-                top: 0;
-                left: 0;
-                width: 100%;
-                height: 100%;
-                z-index: 2000;
-            }
+        // 排序：文件夹在前，文件在后
+        const entries = Object.entries(tree).sort(([, a], [, b]) => {
+            if (a.type === 'directory' && b.type === 'file') return -1;
+            if (a.type === 'file' && b.type === 'directory') return 1;
+            return 0;
+        });
+        
+        for (const [name, item] of entries) {
+            const isDirectory = item.type === 'directory';
+            const icon = isDirectory ? '📁' : this.getFileIcon(name);
+            const hasChildren = isDirectory && Object.keys(item.children || {}).length > 0;
             
-            .file-selector-modal .modal-overlay {
-                width: 100%;
-                height: 100%;
-                background: rgba(0, 0, 0, 0.5);
-                display: flex;
-                align-items: center;
-                justify-content: center;
-            }
+            // 为文件添加更明显的样式类
+            const itemClass = isDirectory ? 'directory' : 'file';
+            const debugInfo = `<!-- ${item.type}: ${name} -->`;
             
-            .file-selector-modal .modal-content {
-                background: white;
-                border-radius: 8px;
-                width: 500px;
-                max-width: 90vw;
-                max-height: 70vh;
-                overflow: hidden;
-                box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
-            }
-            
-            .file-selector-modal .modal-header {
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                padding: 20px;
-                border-bottom: 1px solid #eee;
-                background: #f8f9fa;
-            }
-            
-            .file-selector-modal .modal-header h3 {
-                margin: 0;
-                color: #333;
-            }
-            
-            .file-selector-modal .modal-close {
-                background: none;
-                border: none;
-                font-size: 24px;
-                cursor: pointer;
-                color: #666;
-                padding: 0;
-                width: 30px;
-                height: 30px;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-            }
-            
-            .file-selector-modal .modal-body {
-                padding: 20px;
-                max-height: 50vh;
-                overflow-y: auto;
-            }
-            
-            .file-list {
-                display: flex;
-                flex-direction: column;
-                gap: 4px;
-            }
-            
-            .file-list-item {
-                display: flex;
-                align-items: center;
-                gap: 8px;
-                padding: 8px 12px;
-                border-radius: 4px;
-                cursor: pointer;
-                transition: background-color 0.2s;
-            }
-            
-            .file-list-item:hover {
-                background: #f0f0f0;
-            }
-            
-            .file-icon {
-                font-size: 16px;
-                flex-shrink: 0;
-            }
-            
-            .file-info {
-                flex: 1;
-                display: flex;
-                flex-direction: column;
-                gap: 2px;
-                min-width: 0;
-            }
-            
-            .file-path {
-                font-size: 14px;
-                color: #333;
-                word-break: break-all;
-            }
-            
-            .file-type {
-                font-size: 12px;
-                color: #666;
-                opacity: 0.8;
-            }
-            
-            .file-selector-modal .modal-footer {
-                display: flex;
-                justify-content: flex-end;
-                padding: 20px;
-                border-top: 1px solid #eee;
-                background: #f8f9fa;
-            }
-            
-            .file-selector-modal .btn-cancel {
-                padding: 10px 20px;
-                border: none;
-                border-radius: 4px;
-                cursor: pointer;
-                font-size: 14px;
-                font-weight: 600;
-                background: #6c757d;
-                color: white;
-            }
-            
-            .file-selector-modal .btn-cancel:hover {
-                background: #5a6268;
-            }
-        `;
-        document.head.appendChild(styles);
+            html += `
+                ${debugInfo}
+                <div class="tree-item ${itemClass}" 
+                     data-type="${item.type}" 
+                     data-path="${item.path}"
+                     data-level="${level}"
+                     data-name="${name}">
+                    <div class="tree-content tree-level-${level}">
+                        ${hasChildren ? 
+                            '<span class="tree-toggle" data-expanded="false">▶</span>' : 
+                            '<span class="tree-spacer"></span>'
+                        }
+                        <span class="tree-icon" title="${isDirectory ? '文件夹' : '文件'}">${icon}</span>
+                        <span class="tree-label" title="${item.path}">${name}</span>
+                        ${!isDirectory && item.size ? 
+                            `<span class="tree-size" title="文件大小">${this.formatFileSize(item.size)}</span>` : 
+                            ''
+                        }
+                    </div>
+                    ${hasChildren ? `
+                        <div class="tree-children" style="display: none;">
+                            ${this.renderFileTree(item.children, level + 1)}
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+        }
+        
+        return html;
+    }
+
+    /**
+     * 获取文件图标
+     */
+    getFileIcon(fileName) {
+        const ext = fileName.split('.').pop()?.toLowerCase();
+        const iconMap = {
+            'tex': '📄',
+            'latex': '📄', 
+            'md': '📝',
+            'txt': '📄',
+            'js': '📜',
+            'json': '⚙️',
+            'html': '🌐',
+            'css': '🎨',
+            'png': '🖼️',
+            'jpg': '🖼️',
+            'jpeg': '🖼️',
+            'gif': '🖼️',
+            'pdf': '📕',
+            'zip': '📦',
+            'bib': '📚'
+        };
+        return iconMap[ext] || '📄';
     }
     
     /**
@@ -2203,5 +2199,313 @@ export class AgentPanelPlugin {
         } else {
             return `${Math.round(bytes / (1024 * 1024) * 10) / 10}MB`;
         }
+    }
+
+    /**
+     * 添加文件树样式
+     */
+    addFileTreeStyles() {
+        if (document.getElementById('file-tree-styles')) return;
+        
+        const styles = document.createElement('style');
+        styles.id = 'file-tree-styles';
+        styles.textContent = `
+            .file-tree-modal {
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                z-index: 2000;
+            }
+            
+            .file-tree-modal .modal-overlay {
+                width: 100%;
+                height: 100%;
+                background: rgba(0, 0, 0, 0.5);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+            
+            .file-tree-modal .modal-content {
+                background: white;
+                border-radius: 8px;
+                width: 600px;
+                max-width: 90vw;
+                max-height: 80vh;
+                overflow: hidden;
+                box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+                display: flex;
+                flex-direction: column;
+            }
+            
+            .file-tree-modal .modal-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: 20px;
+                border-bottom: 1px solid #eee;
+                background: #f8f9fa;
+                flex-shrink: 0;
+            }
+            
+            .file-tree-modal .modal-header h3 {
+                margin: 0;
+                color: #333;
+                flex: 1;
+            }
+            
+            .modal-header-actions {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+            }
+            
+            .btn-select-all,
+            .btn-clear-all {
+                padding: 6px 12px;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                background: white;
+                cursor: pointer;
+                font-size: 12px;
+                color: #666;
+                transition: all 0.2s;
+            }
+            
+            .btn-select-all:hover,
+            .btn-clear-all:hover {
+                background: #f0f0f0;
+                border-color: #ccc;
+            }
+            
+            .file-tree-modal .modal-close {
+                background: none;
+                border: none;
+                font-size: 24px;
+                cursor: pointer;
+                color: #666;
+                padding: 0;
+                width: 30px;
+                height: 30px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+            
+            .file-tree-modal .modal-body {
+                flex: 1;
+                overflow: hidden;
+                display: flex;
+                flex-direction: column;
+            }
+            
+            .file-tree-container {
+                flex: 1;
+                overflow-y: auto;
+                padding: 10px 0;
+            }
+            
+            .file-tree {
+                padding: 0 20px;
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                font-size: 14px;
+                line-height: 1.4;
+            }
+            
+            .tree-item {
+                margin: 0;
+                user-select: none;
+                position: relative;
+            }
+            
+            .tree-item:hover .tree-content {
+                background: #f5f5f5;
+            }
+            
+            .tree-item.selected .tree-content {
+                background: #e3f2fd;
+                border: 1px solid #2196f3;
+                border-radius: 3px;
+            }
+            
+            .tree-content {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                padding: 4px 6px;
+                cursor: pointer;
+                transition: background-color 0.2s;
+                min-height: 24px;
+                border-radius: 3px;
+            }
+            
+            /* 树形层级缩进 */
+            .tree-level-0 { padding-left: 6px; }
+            .tree-level-1 { padding-left: 22px; }
+            .tree-level-2 { padding-left: 38px; }
+            .tree-level-3 { padding-left: 54px; }
+            .tree-level-4 { padding-left: 70px; }
+            .tree-level-5 { padding-left: 86px; }
+            .tree-level-6 { padding-left: 102px; }
+            .tree-level-7 { padding-left: 118px; }
+            .tree-level-8 { padding-left: 134px; }
+            .tree-level-9 { padding-left: 150px; }
+            
+            .tree-toggle {
+                width: 16px;
+                height: 16px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 10px;
+                color: #666;
+                cursor: pointer;
+                transition: transform 0.2s;
+                flex-shrink: 0;
+                border-radius: 2px;
+            }
+            
+            .tree-toggle:hover {
+                background: #e0e0e0;
+            }
+            
+            .tree-spacer {
+                width: 16px;
+                height: 16px;
+                flex-shrink: 0;
+            }
+            
+            .tree-icon {
+                font-size: 14px;
+                flex-shrink: 0;
+                width: 16px;
+                text-align: center;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                height: 16px;
+            }
+            
+            .tree-label {
+                flex: 1;
+                font-size: 13px;
+                color: #333;
+                cursor: pointer;
+                min-width: 0;
+                word-break: break-word;
+                padding: 0;
+                line-height: 1.3;
+                margin: 0;
+                display: flex;
+                align-items: center;
+            }
+            
+            .tree-size {
+                font-size: 11px;
+                color: #888;
+                opacity: 0.8;
+                flex-shrink: 0;
+                background: #f0f0f0;
+                padding: 2px 6px;
+                border-radius: 3px;
+                margin-left: 8px;
+            }
+            
+            .tree-children {
+                overflow: hidden;
+                transition: all 0.2s ease;
+            }
+            
+            .tree-item.directory .tree-content {
+                font-weight: 500;
+            }
+            
+            .tree-item.file .tree-content {
+                font-weight: normal;
+            }
+            
+            .tree-item.directory .tree-label {
+                color: #1976d2;
+                font-weight: 500;
+            }
+            
+            .tree-item.file .tree-label {
+                color: #212121;
+                font-weight: 400;
+            }
+            
+            .tree-item.file .tree-icon {
+                opacity: 0.9;
+            }
+            
+            .tree-item.file .tree-size {
+                background: #e8f5e8;
+                color: #2e7d32;
+                border: 1px solid #c8e6c9;
+            }
+            
+            .file-tree-modal .modal-footer {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: 20px;
+                border-top: 1px solid #eee;
+                background: #f8f9fa;
+                flex-shrink: 0;
+            }
+            
+            .selected-count {
+                font-size: 14px;
+                color: #666;
+            }
+            
+            .selected-count span {
+                font-weight: bold;
+                color: #2196f3;
+            }
+            
+            .modal-actions {
+                display: flex;
+                gap: 10px;
+            }
+            
+            .btn-cancel,
+            .btn-confirm {
+                padding: 10px 20px;
+                border: none;
+                border-radius: 4px;
+                cursor: pointer;
+                font-size: 14px;
+                font-weight: 600;
+                transition: background-color 0.2s;
+            }
+            
+            .btn-cancel {
+                background: #6c757d;
+                color: white;
+            }
+            
+            .btn-cancel:hover {
+                background: #5a6268;
+            }
+            
+            .btn-confirm {
+                background: #2196f3;
+                color: white;
+            }
+            
+            .btn-confirm:hover:not(:disabled) {
+                background: #1976d2;
+            }
+            
+            .btn-confirm:disabled {
+                background: #ccc;
+                cursor: not-allowed;
+                opacity: 0.6;
+            }
+        `;
+        document.head.appendChild(styles);
     }
 } 

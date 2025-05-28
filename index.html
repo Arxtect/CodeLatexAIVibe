@@ -279,13 +279,15 @@
         
         .context-menu {
             position: fixed;
-            background: white;
-            border: 1px solid #ccc;
+            background: #252526;
+            border: 1px solid #3e3e42;
             border-radius: 4px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            z-index: 1000;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            z-index: 10000;
             min-width: 200px;
             font-size: 14px;
+            color: #d4d4d4;
+            padding: 4px 0;
         }
         
         .context-menu.hidden {
@@ -293,22 +295,23 @@
         }
         
         .context-menu-item {
-            padding: 8px 12px;
+            padding: 8px 16px;
             cursor: pointer;
-            border-bottom: 1px solid #f0f0f0;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: background-color 0.2s;
+            color: #d4d4d4;
         }
         
         .context-menu-item:hover {
-            background: #f0f0f0;
-        }
-        
-        .context-menu-item:last-child {
-            border-bottom: none;
+            background: #094771;
+            color: #ffffff;
         }
         
         .context-menu-separator {
             height: 1px;
-            background: #e0e0e0;
+            background: #3e3e42;
             margin: 4px 0;
         }
         
@@ -1332,21 +1335,18 @@
     
     <!-- 右键菜单 -->
     <div id="contextMenu" class="context-menu hidden">
-        <div class="context-menu-item" id="addSelectionItem" onclick="addSelectionToContext()">
+        <div class="context-menu-item" id="addSelectionItem" onclick="addSelectionToContextFromMenu()">
             📝 添加选中文本到上下文
         </div>
-        <div class="context-menu-item" id="addFileItem" onclick="addCurrentFileToContext()">
+        <div class="context-menu-item" id="addFileItem" onclick="addCurrentFileToContextFromMenu()">
             📄 添加当前文件到上下文
         </div>
         <div class="context-menu-item" id="addContextFileItem" onclick="addContextMenuFileToContext()">
             📄 添加文件到上下文
         </div>
-        <div class="context-menu-item" id="addContextFolderItem" onclick="addContextMenuFolderToContext()">
-            📁 添加文件夹到上下文
-        </div>
         <div class="context-menu-separator"></div>
         <div class="context-menu-item" id="deleteItem" onclick="deleteFile()">
-            🗑️ 删除
+            🗑️删除
         </div>
         <div class="context-menu-item" id="renameItem" onclick="renameFile()">
             ✏️ 重命名

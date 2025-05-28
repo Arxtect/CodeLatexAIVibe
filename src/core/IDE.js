@@ -129,22 +129,9 @@ export class IDE {
             }
         });
 
-        // Undo/Redo functionality disabled - using Monaco's built-in undo/redo
-        // this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyZ, () => {
-        //     console.log('Ctrl+Z 被触发，使用 Yjs UndoManager');
-        //     this.undo();
-        // });
+        // 注册自定义右键菜单项
+        this.registerCustomContextMenuActions();
         
-        // this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyY, () => {
-        //     console.log('Ctrl+Y 被触发，使用 Yjs UndoManager');
-        //     this.redo();
-        // });
-        
-        // this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyZ, () => {
-        //     console.log('Ctrl+Shift+Z 被触发，使用 Yjs UndoManager');
-        //     this.redo();
-        // });
-
         // 监听编辑器内容变化
         this.editor.onDidChangeModelContent(() => {
             // 内容变化会自动通过 Yjs 同步，无需设置 isDirty
@@ -166,6 +153,89 @@ export class IDE {
         this.pluginManager.initEditor(this.editor);
     }
 
+    /**
+     * 注册自定义右键菜单动作到Monaco编辑器
+     */
+    registerCustomContextMenuActions() {
+        // 添加选中文本到上下文
+        this.editor.addAction({
+            id: 'addSelectionToContext',
+            label: '➕ 添加选中文本到AI上下文',
+            contextMenuGroupId: 'ai-context',
+            contextMenuOrder: 1,
+            precondition: 'editorHasSelection',
+            run: (editor) => {
+                if (typeof window.addSelectionToContext === 'function') {
+                    window.addSelectionToContext();
+                } else {
+                    console.warn('addSelectionToContext函数未找到');
+                }
+            }
+        });
+
+        // 添加当前文件到上下文
+        this.editor.addAction({
+            id: 'addCurrentFileToContext',
+            label: '📄 添加当前文件到AI上下文',
+            contextMenuGroupId: 'ai-context',
+            contextMenuOrder: 2,
+            run: (editor) => {
+                if (typeof window.addCurrentFileToContext === 'function') {
+                    window.addCurrentFileToContext();
+                } else {
+                    console.warn('addCurrentFileToContext函数未找到');
+                }
+            }
+        });
+
+        // 分隔符（通过不同的组ID实现）
+        this.editor.addAction({
+            id: 'openAIAssistant',
+            label: '🤖 打开AI助手面板',
+            contextMenuGroupId: 'ai-panel',
+            contextMenuOrder: 1,
+            run: (editor) => {
+                if (typeof window.showAgentPanel === 'function') {
+                    window.showAgentPanel();
+                } else {
+                    console.warn('showAgentPanel函数未找到');
+                }
+            }
+        });
+
+        console.log('自定义右键菜单项已注册到Monaco编辑器');
+    }
+
+    /**
+     * 为插件提供注册右键菜单项的接口
+     */
+    registerContextMenuAction(actionConfig) {
+        if (!this.editor) {
+            console.warn('编辑器未初始化，无法注册右键菜单项');
+            return;
+        }
+
+        // 验证必需的配置
+        if (!actionConfig.id || !actionConfig.label || !actionConfig.run) {
+            console.error('右键菜单项配置不完整，需要id、label和run属性');
+            return;
+        }
+
+        // 设置默认值
+        const config = {
+            contextMenuGroupId: 'custom',
+            contextMenuOrder: 1,
+            ...actionConfig
+        };
+
+        try {
+            this.editor.addAction(config);
+            console.log(`右键菜单项 "${config.label}" 已注册`);
+        } catch (error) {
+            console.error('注册右键菜单项失败:', error);
+        }
+    }
+
     async initUI() {
         // 初始化设置 UI
         this.settingsUI = new SettingsUI(this.settingsManager, this.shortcutManager, this.pluginManager);
@@ -176,8 +246,8 @@ export class IDE {
         // 初始化项目版本管理
         await this.initProjectVersioning();
         
-        // 初始化右键菜单
-        this.initContextMenu();
+        // 初始化右键菜单 - 已禁用，使用 main.js 中的实现
+        // this.initContextMenu();
         
         // 初始化文件浏览器
         this.refreshFileExplorer();

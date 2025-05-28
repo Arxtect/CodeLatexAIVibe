@@ -103,9 +103,6 @@ async function initIDE() {
         // 初始化 Agent 系统
         await initAgents();
         
-        // 初始化右键菜单
-        initContextMenu();
-        
         console.log('LaTeX IDE 初始化完成');
     } catch (error) {
         console.error('IDE 初始化失败:', error);
@@ -371,6 +368,17 @@ async function initAgents() {
         window.ide.pluginManager.registerPlugin(latexMaster);
         
         console.log('Agent 插件系统初始化完成');
+        
+        // 添加调试信息，检查全局函数注册情况
+        setTimeout(() => {
+            console.log('=== 全局函数检查 ===');
+            console.log('window.addSelectionToContext:', typeof window.addSelectionToContext);
+            console.log('window.addCurrentFileToContext:', typeof window.addCurrentFileToContext);
+            console.log('window.addFileToContextByPath:', typeof window.addFileToContextByPath);
+            console.log('window.agentPanel:', !!window.agentPanel);
+            console.log('=== 检查完成 ===');
+        }, 1000);
+        
     } catch (error) {
         console.error('Agent 插件系统初始化失败:', error);
     }
@@ -379,182 +387,4 @@ async function initAgents() {
 // 页面加载完成后初始化
 document.addEventListener('DOMContentLoaded', () => {
     initIDE();
-});
-
-// 初始化右键菜单
-let currentContextTarget = null;
-
-function initContextMenu() {
-    const contextMenu = document.getElementById('contextMenu');
-    
-    // 监听右键事件
-    document.addEventListener('contextmenu', (e) => {
-        // 检查是否在文件tab上
-        const fileTab = e.target.closest('.tab');
-        if (fileTab) {
-            e.preventDefault();
-            const filePath = fileTab.dataset.file;
-            if (filePath) {
-                currentContextTarget = {
-                    type: 'file-tab',
-                    element: fileTab,
-                    path: filePath,
-                    isFolder: false
-                };
-                showFileTabContextMenu(e.clientX, e.clientY);
-                return;
-            }
-        }
-        
-        // 检查是否在文件管理器区域
-        const fileExplorer = document.getElementById('fileExplorer');
-        const editorContainer = document.querySelector('.monaco-editor');
-        
-        if (fileExplorer && fileExplorer.contains(e.target)) {
-            e.preventDefault();
-            
-            // 检查是否点击在文件项上
-            const fileItem = e.target.closest('.file-item');
-            if (fileItem) {
-                currentContextTarget = {
-                    type: 'file-item',
-                    element: fileItem,
-                    path: fileItem.dataset.path,
-                    isFolder: fileItem.classList.contains('folder')
-                };
-                showFileContextMenu(e.clientX, e.clientY);
-            } else {
-                currentContextTarget = { type: 'file-explorer' };
-                showFileExplorerContextMenu(e.clientX, e.clientY);
-            }
-        } else if (editorContainer && editorContainer.contains(e.target)) {
-            e.preventDefault();
-            currentContextTarget = { type: 'editor' };
-            showEditorContextMenu(e.clientX, e.clientY);
-        }
-    });
-    
-    // 点击其他地方隐藏菜单
-    document.addEventListener('click', () => {
-        hideContextMenu();
-    });
-    
-    // 监听键盘事件
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') {
-            hideContextMenu();
-        }
-    });
-}
-
-function showFileTabContextMenu(x, y) {
-    const contextMenu = document.getElementById('contextMenu');
-    
-    // 显示文件tab相关的菜单项
-    document.getElementById('addSelectionItem').style.display = 'none';
-    document.getElementById('addFileItem').style.display = 'none';
-    document.getElementById('addContextFileItem').style.display = 'block';
-    document.getElementById('addContextFolderItem').style.display = 'none';
-    document.getElementById('deleteItem').style.display = 'none';
-    document.getElementById('renameItem').style.display = 'none';
-    
-    showContextMenu(x, y);
-}
-
-function showFileContextMenu(x, y) {
-    const contextMenu = document.getElementById('contextMenu');
-    
-    // 显示/隐藏相应的菜单项
-    document.getElementById('addSelectionItem').style.display = 'none';
-    document.getElementById('addFileItem').style.display = 'none';
-    document.getElementById('addContextFileItem').style.display = currentContextTarget.isFolder ? 'none' : 'block';
-    document.getElementById('addContextFolderItem').style.display = currentContextTarget.isFolder ? 'block' : 'none';
-    document.getElementById('deleteItem').style.display = 'block';
-    document.getElementById('renameItem').style.display = 'block';
-    
-    showContextMenu(x, y);
-}
-
-function showFileExplorerContextMenu(x, y) {
-    const contextMenu = document.getElementById('contextMenu');
-    
-    // 只显示新建相关的菜单项
-    document.getElementById('addSelectionItem').style.display = 'none';
-    document.getElementById('addFileItem').style.display = 'none';
-    document.getElementById('addContextFileItem').style.display = 'none';
-    document.getElementById('addContextFolderItem').style.display = 'none';
-    document.getElementById('deleteItem').style.display = 'none';
-    document.getElementById('renameItem').style.display = 'none';
-    
-    showContextMenu(x, y);
-}
-
-function showEditorContextMenu(x, y) {
-    const contextMenu = document.getElementById('contextMenu');
-    
-    // 显示编辑器相关的菜单项
-    document.getElementById('addSelectionItem').style.display = 'block';
-    document.getElementById('addFileItem').style.display = 'block';
-    document.getElementById('addContextFileItem').style.display = 'none';
-    document.getElementById('addContextFolderItem').style.display = 'none';
-    document.getElementById('deleteItem').style.display = 'none';
-    document.getElementById('renameItem').style.display = 'none';
-    
-    showContextMenu(x, y);
-}
-
-function showContextMenu(x, y) {
-    const contextMenu = document.getElementById('contextMenu');
-    contextMenu.classList.remove('hidden');
-    
-    // 调整位置，确保菜单不会超出屏幕
-    const rect = contextMenu.getBoundingClientRect();
-    const maxX = window.innerWidth - rect.width;
-    const maxY = window.innerHeight - rect.height;
-    
-    contextMenu.style.left = Math.min(x, maxX) + 'px';
-    contextMenu.style.top = Math.min(y, maxY) + 'px';
-}
-
-function hideContextMenu() {
-    const contextMenu = document.getElementById('contextMenu');
-    contextMenu.classList.add('hidden');
-    currentContextTarget = null;
-}
-
-// 添加右键菜单相关的全局函数
-window.addContextMenuFileToContext = () => {
-    if (currentContextTarget && 
-        ((currentContextTarget.type === 'file-item' && !currentContextTarget.isFolder) ||
-         currentContextTarget.type === 'file-tab')) {
-        if (window.agentPanel) {
-            window.agentPanel.addFileToContextByPath(currentContextTarget.path);
-        }
-    }
-    hideContextMenu();
-};
-
-window.addContextMenuFolderToContext = () => {
-    if (currentContextTarget && currentContextTarget.type === 'file-item' && currentContextTarget.isFolder) {
-        if (window.agentPanel) {
-            window.agentPanel.addFolderToContextByPath(currentContextTarget.path);
-        }
-    }
-    hideContextMenu();
-};
-
-// 添加选中文本到上下文
-window.addSelectionToContext = () => {
-    if (window.agentPanel) {
-        window.agentPanel.addSelectionToContext();
-    }
-    hideContextMenu();
-};
-
-// 添加当前文件到上下文
-window.addCurrentFileToContext = () => {
-    if (window.agentPanel) {
-        window.agentPanel.addCurrentFileToContext();
-    }
-    hideContextMenu();
-}; 
+}); 

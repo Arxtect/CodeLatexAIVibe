@@ -4,11 +4,13 @@ export class ExamplePlugin {
     constructor() {
         this.id = 'example-plugin';
         this.name = '示例插件';
-        this.description = '提供字数统计、自动保存和保存历史记录功能';
+        this.description = '这是一个示例插件，展示插件系统的基本功能';
         this.version = '1.0.0';
         this.type = 'utility';
         this.supportedLanguages = ['latex', 'markdown'];
         this.enabled = true;
+        
+        this.pluginManager = null;
         
         // 插件配置
         this.config = {
@@ -30,6 +32,9 @@ export class ExamplePlugin {
         this.addCustomUI();
         
         console.log('示例插件初始化完成');
+        
+        // 注册右键菜单项
+        this.registerContextMenuItems();
     }
 
     // 编辑器初始化时的处理
@@ -306,5 +311,85 @@ export class ExamplePlugin {
             config: this.config,
             stats: this.exportStats()
         };
+    }
+
+    /**
+     * 注册自定义右键菜单项
+     */
+    registerContextMenuItems() {
+        // 延迟注册，确保编辑器已初始化
+        setTimeout(() => {
+            // 注册一个示例菜单项
+            this.pluginManager.registerContextMenuAction({
+                id: 'example-action-1',
+                label: '🔧 示例功能：格式化选中文本',
+                contextMenuGroupId: 'example-group',
+                contextMenuOrder: 1,
+                precondition: 'editorHasSelection',
+                run: (editor) => {
+                    const selection = editor.getSelection();
+                    const model = editor.getModel();
+                    const selectedText = model.getValueInRange(selection);
+                    
+                    // 简单的格式化：转换为大写
+                    const formattedText = selectedText.toUpperCase();
+                    
+                    editor.executeEdits('example-plugin', [{
+                        range: selection,
+                        text: formattedText
+                    }]);
+                    
+                    console.log('示例插件：文本已格式化为大写');
+                }
+            });
+
+            // 注册另一个示例菜单项
+            this.pluginManager.registerContextMenuAction({
+                id: 'example-action-2',
+                label: '📊 示例功能：统计选中文本',
+                contextMenuGroupId: 'example-group',
+                contextMenuOrder: 2,
+                precondition: 'editorHasSelection',
+                run: (editor) => {
+                    const selection = editor.getSelection();
+                    const model = editor.getModel();
+                    const selectedText = model.getValueInRange(selection);
+                    
+                    const stats = {
+                        characters: selectedText.length,
+                        words: selectedText.split(/\s+/).filter(word => word.length > 0).length,
+                        lines: selectedText.split('\n').length
+                    };
+                    
+                    alert(`文本统计：\n字符数：${stats.characters}\n单词数：${stats.words}\n行数：${stats.lines}`);
+                }
+            });
+
+            // 注册一个不需要选中文本的菜单项
+            this.pluginManager.registerContextMenuAction({
+                id: 'example-action-3',
+                label: '💡 示例功能：插入当前时间',
+                contextMenuGroupId: 'example-group',
+                contextMenuOrder: 3,
+                run: (editor) => {
+                    const position = editor.getPosition();
+                    const currentTime = new Date().toLocaleString();
+                    
+                    editor.executeEdits('example-plugin', [{
+                        range: {
+                            startLineNumber: position.lineNumber,
+                            startColumn: position.column,
+                            endLineNumber: position.lineNumber,
+                            endColumn: position.column
+                        },
+                        text: `% 插入时间：${currentTime}\n`
+                    }]);
+                    
+                    console.log('示例插件：已插入当前时间');
+                }
+            });
+
+            console.log('示例插件：右键菜单项已注册');
+        }, 1000);
     }
 } 
