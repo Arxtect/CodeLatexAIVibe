@@ -294,7 +294,7 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
     }
     
     /**
-     * 处理消息
+     * 处理用户消息的主入口 - 实现两阶段循环逻辑
      */
     async processMessage(message, context, onStream = null) {
         try {
@@ -319,115 +319,77 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
             
             this.log('info', `用户请求: ${message}`);
             
-            // 收集上下文
-            const fullContext = await this.collectContext(message, context);
+            // 收集初始上下文
+            let fullContext = await this.collectContext(message, context);
             
-            // 初始化对话历史和循环控制
-            let conversationMessages = [];
-            let maxIterations = 5; // 防止无限循环
+            // 初始化循环控制
+            let maxIterations = 10; // 防止无限循环
             let iteration = 0;
-            let originalMessage = message; // 保存原始消息
+            let conversationHistory = []; // 存储整个对话历史
+            let accumulatedContext = { ...fullContext }; // 累积的上下文信息
             
             while (iteration < maxIterations) {
                 iteration++;
                 this.log('info', `处理迭代 ${iteration}/${maxIterations}`);
                 
-                // 判断是否需要使用工具调用
-                const shouldUseTools = this.shouldUseTools(originalMessage, conversationMessages);
+                // 调用大语言模型进行决策
+                const decision = await this.makeDecision(message, accumulatedContext, conversationHistory, onStream);
                 
-                if (shouldUseTools) {
-                    this.log('info', '使用工具调用模式');
+                if (!decision) {
+                    return this.createResponse('❌ 无法理解您的需求，请重新描述');
+                }
+                
+                // 处理不同类型的决策
+                if (decision.type === 'gather_info') {
+                    this.log('info', '执行信息获取阶段');
                     
-                    // 构建工具调用的消息
-                    const systemPrompt = this.buildSystemPrompt();
-                    const userPrompt = this.buildUserPrompt(originalMessage, fullContext);
+                    // 执行信息获取操作（只读）
+                    const gatherResult = await this.executeGatherInfo(decision, accumulatedContext);
                     
-                    const toolCallMessages = [
-                        { role: 'system', content: systemPrompt },
-                        { role: 'user', content: userPrompt },
-                        ...conversationMessages
-                    ];
+                    // 将获取的信息添加到累积上下文
+                    accumulatedContext = this.mergeContext(accumulatedContext, gatherResult);
                     
-                    // 调用API进行工具调用
-                    const toolCallResponse = await this.callOpenAI(toolCallMessages, onStream);
+                    // 添加到对话历史
+                    conversationHistory.push({
+                        type: 'gather_info',
+                        decision: decision,
+                        result: gatherResult,
+                        timestamp: new Date().toISOString()
+                    });
                     
-                    // 检查是否是工具调用响应
-                    if (typeof toolCallResponse === 'object' && toolCallResponse.isToolCallResponse) {
-                        // 工具调用完成，将结果添加到对话历史
-                        conversationMessages.push({
-                            role: 'assistant',
-                            content: toolCallResponse.content
-                        });
-                        
-                        this.log('info', '工具调用完成，继续处理后续响应');
-                        // 继续下一轮处理，让AI基于工具调用结果生成执行计划
-                        continue;
-                    } else {
-                        // 如果不是工具调用，直接返回响应
-                        return this.createResponse(toolCallResponse);
-                    }
+                    this.log('info', `信息获取完成，累积上下文项目: ${Object.keys(accumulatedContext).length}`);
+                    
+                } else if (decision.type === 'execute_operations') {
+                    this.log('info', '执行操作阶段');
+                    
+                    // 执行操作（写入/修改）
+                    const executeResult = await this.executeOperations(decision, accumulatedContext);
+                    
+                    // 添加到对话历史
+                    conversationHistory.push({
+                        type: 'execute_operations',
+                        decision: decision,
+                        result: executeResult,
+                        timestamp: new Date().toISOString()
+                    });
+                    
+                    this.log('info', `操作执行完成: ${executeResult.completedSteps}/${executeResult.totalSteps} 步骤`);
+                    
+                } else if (decision.type === 'complete_task') {
+                    this.log('info', '任务完成');
+                    
+                    // 任务完成，返回最终结果
+                    return this.createResponse(`✅ ${decision.message || '任务已完成'}`);
+                    
+                } else if (decision.type === 'direct_response') {
+                    this.log('info', '直接响应');
+                    
+                    // 直接响应，不需要进一步处理
+                    return this.createResponse(decision.message);
+                    
                 } else {
-                    this.log('info', '使用执行计划模式');
-                    
-                    // 分析并生成执行计划
-                    const result = await this.analyzeAndPlan(originalMessage, fullContext, onStream);
-                    
-                    if (!result) {
-                        return this.createResponse('❌ 无法理解您的需求，请重新描述');
-                    }
-                    
-                    // 处理不同类型的响应
-                    if (result.isToolCallResponse) {
-                        // 工具调用响应，添加到对话历史并继续
-                        conversationMessages.push({
-                            role: 'assistant',
-                            content: result.content
-                        });
-                        this.log('info', '收到工具调用响应，继续处理');
-                        continue;
-                    } else if (result.isTaskCompleted) {
-                        // 任务完成，返回完成消息
-                        this.log('info', '任务已完成');
-                        return this.createResponse(`✅ ${result.content}`);
-                    } else if (result.isDirectResponse) {
-                        // 直接响应，不需要执行计划
-                        this.log('info', '返回直接响应');
-                        return this.createResponse(result.content);
-                    } else if (result.steps && Array.isArray(result.steps)) {
-                        // 检查是否包含completeTask步骤
-                        const hasCompleteTask = result.steps.some(step => step.type === 'completeTask');
-                        
-                        if (hasCompleteTask) {
-                            // 包含完成任务步骤，执行计划并结束
-                            this.log('info', '执行计划包含完成任务步骤，开始执行并结束');
-                            return await this.executePlan(result, fullContext);
-                        } else {
-                            // 不包含完成任务步骤，执行当前计划并继续
-                            this.log('info', '执行部分计划，继续处理');
-                            
-                            // 执行当前计划
-                            await this.executePlan(result, fullContext);
-                            
-                            // 将执行结果添加到对话历史
-                            conversationMessages.push({
-                                role: 'assistant',
-                                content: `已执行计划: ${result.goal}。请继续下一步操作。`
-                            });
-                            
-                            // 添加用户消息，要求继续完成任务
-                            conversationMessages.push({
-                                role: 'user',
-                                content: '请继续完成剩余的任务，直到全部完成。'
-                            });
-                            
-                            // 继续下一轮处理
-                            continue;
-                        }
-                    } else {
-                        // 未知响应类型
-                        this.log('warn', '未知的响应类型', result);
-                        return this.createResponse('❌ 响应格式异常，请重试');
-                    }
+                    this.log('warn', '未知的决策类型', decision);
+                    return this.createResponse('❌ 决策类型异常，请重试');
                 }
             }
             
@@ -439,6 +401,311 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
             this.handleError(error, 'processMessage');
             return this.createResponse(`❌ 处理失败: ${error.message}`);
         }
+    }
+    
+    /**
+     * 大语言模型决策 - 决定下一步是获取信息还是执行操作
+     */
+    async makeDecision(originalMessage, context, conversationHistory, onStream = null) {
+        try {
+            this.log('info', '正在进行决策分析...');
+            
+            const systemPrompt = this.buildDecisionSystemPrompt();
+            const userPrompt = this.buildDecisionUserPrompt(originalMessage, context, conversationHistory);
+            
+            const response = await this.callOpenAI([
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: userPrompt }
+            ], null); // 决策阶段不使用流模式
+            
+            // 解析决策响应
+            const decision = this.parseDecisionResponse(response);
+            
+            if (decision) {
+                this.log('info', `决策结果: ${decision.type} - ${decision.reasoning || '无说明'}`);
+                return decision;
+            }
+            
+            this.log('warn', '无法解析决策响应', response);
+            return null;
+            
+        } catch (error) {
+            this.log('error', '决策分析失败', error);
+            throw error;
+        }
+    }
+    
+    /**
+     * 执行信息获取阶段（只读操作）
+     */
+    async executeGatherInfo(decision, context) {
+        this.log('info', `执行信息获取: ${decision.tools?.length || 0} 个工具调用`);
+        
+        const results = {
+            success: true,
+            gatheredData: {},
+            errors: []
+        };
+        
+        if (!decision.tools || !Array.isArray(decision.tools)) {
+            this.log('warn', '信息获取决策中没有工具调用');
+            return results;
+        }
+        
+        // 显示工具调用面板
+        let toolCallId = null;
+        if (window.agentPanel && typeof window.agentPanel.showToolCallPanel === 'function') {
+            const toolCalls = decision.tools.map((tool, index) => ({
+                id: `gather_${Date.now()}_${index}`,
+                function: {
+                    name: tool.name,
+                    arguments: JSON.stringify(tool.parameters || {})
+                }
+            }));
+            toolCallId = window.agentPanel.showToolCallPanel(toolCalls);
+        }
+        
+        // 执行每个工具调用
+        for (let i = 0; i < decision.tools.length; i++) {
+            const tool = decision.tools[i];
+            
+            try {
+                this.log('info', `执行信息获取工具 ${i + 1}/${decision.tools.length}: ${tool.name}`);
+                
+                // 更新工具调用状态
+                if (toolCallId && window.agentPanel && typeof window.agentPanel.updateToolCallStep === 'function') {
+                    window.agentPanel.updateToolCallStep(toolCallId, i, 'executing');
+                }
+                
+                // 验证工具是否为只读操作
+                if (!this.isReadOnlyTool(tool.name)) {
+                    throw new Error(`工具 ${tool.name} 不是只读操作，信息获取阶段只允许读取操作`);
+                }
+                
+                // 执行工具调用
+                const toolCall = {
+                    id: `gather_${Date.now()}_${i}`,
+                    function: {
+                        name: tool.name,
+                        arguments: JSON.stringify(tool.parameters || {})
+                    }
+                };
+                
+                const result = await this.toolCallManager.executeToolCall(toolCall);
+                
+                // 存储结果
+                results.gatheredData[tool.name] = result;
+                
+                // 更新工具调用状态
+                if (toolCallId && window.agentPanel && typeof window.agentPanel.updateToolCallStep === 'function') {
+                    window.agentPanel.updateToolCallStep(toolCallId, i, 'success', result);
+                }
+                
+                this.log('info', `工具 ${tool.name} 执行成功`);
+                
+            } catch (error) {
+                this.log('error', `工具 ${tool.name} 执行失败`, error);
+                
+                results.errors.push({
+                    tool: tool.name,
+                    error: error.message
+                });
+                
+                // 更新工具调用状态
+                if (toolCallId && window.agentPanel && typeof window.agentPanel.updateToolCallStep === 'function') {
+                    window.agentPanel.updateToolCallStep(toolCallId, i, 'error', { error: error.message });
+                }
+            }
+        }
+        
+        // 完成工具调用
+        if (toolCallId && window.agentPanel && typeof window.agentPanel.completeToolCall === 'function') {
+            window.agentPanel.completeToolCall(toolCallId);
+        }
+        
+        results.success = results.errors.length === 0;
+        return results;
+    }
+    
+    /**
+     * 执行操作阶段（写入/修改操作）
+     */
+    async executeOperations(decision, context) {
+        this.log('info', `执行操作: ${decision.operations?.length || 0} 个操作`);
+        
+        const results = {
+            success: true,
+            completedSteps: 0,
+            totalSteps: decision.operations?.length || 0,
+            errors: []
+        };
+        
+        if (!decision.operations || !Array.isArray(decision.operations)) {
+            this.log('warn', '操作决策中没有操作步骤');
+            return results;
+        }
+        
+        // 显示执行面板
+        let executionId = null;
+        if (window.agentPanel && typeof window.agentPanel.showExecutionPanel === 'function') {
+            const actions = decision.operations.map(op => ({
+                type: op.type,
+                description: op.description,
+                target: op.target
+            }));
+            executionId = window.agentPanel.showExecutionPanel(actions);
+        }
+        
+        // 执行每个操作
+        for (let i = 0; i < decision.operations.length; i++) {
+            const operation = decision.operations[i];
+            
+            try {
+                this.log('info', `执行操作 ${i + 1}/${decision.operations.length}: ${operation.type} - ${operation.description}`);
+                
+                // 更新执行状态
+                if (executionId && window.agentPanel && typeof window.agentPanel.updateExecutionStep === 'function') {
+                    window.agentPanel.updateExecutionStep(executionId, i, 'executing', operation.description);
+                }
+                
+                // 验证操作是否为写入操作
+                if (!this.isWriteOperation(operation.type)) {
+                    throw new Error(`操作 ${operation.type} 不是写入操作，执行阶段只允许写入/修改操作`);
+                }
+                
+                // 创建并执行动作
+                const action = await this.createActionFromOperation(operation, context);
+                
+                if (action) {
+                    // 这里应该执行实际的文件操作
+                    await this.executeAction(action);
+                    results.completedSteps++;
+                    
+                    // 更新执行状态
+                    if (executionId && window.agentPanel && typeof window.agentPanel.updateExecutionStep === 'function') {
+                        window.agentPanel.updateExecutionStep(executionId, i, 'success', operation.description, { action: action.type });
+                    }
+                    
+                    this.log('info', `操作 ${operation.type} 执行成功`);
+                } else {
+                    throw new Error(`无法创建操作: ${operation.type}`);
+                }
+                
+            } catch (error) {
+                this.log('error', `操作 ${operation.type} 执行失败`, error);
+                
+                results.errors.push({
+                    operation: operation.type,
+                    description: operation.description,
+                    error: error.message
+                });
+                
+                // 更新执行状态
+                if (executionId && window.agentPanel && typeof window.agentPanel.updateExecutionStep === 'function') {
+                    window.agentPanel.updateExecutionStep(executionId, i, 'error', operation.description, { error: error.message });
+                }
+            }
+        }
+        
+        // 完成执行
+        if (executionId && window.agentPanel && typeof window.agentPanel.completeExecution === 'function') {
+            window.agentPanel.completeExecution(executionId);
+        }
+        
+        results.success = results.errors.length === 0;
+        return results;
+    }
+    
+    /**
+     * 检查工具是否为只读操作
+     */
+    isReadOnlyTool(toolName) {
+        const readOnlyTools = [
+            'read_file',
+            'list_files', 
+            'get_file_structure',
+            'search_in_files',
+            'get_project_info',
+            'get_editor_state'
+        ];
+        return readOnlyTools.includes(toolName);
+    }
+    
+    /**
+     * 检查操作是否为写入操作
+     */
+    isWriteOperation(operationType) {
+        const writeOperations = [
+            'create',
+            'edit', 
+            'delete',
+            'move',
+            'compile'
+        ];
+        return writeOperations.includes(operationType);
+    }
+    
+    /**
+     * 合并上下文信息
+     */
+    mergeContext(existingContext, newData) {
+        const merged = { ...existingContext };
+        
+        if (newData.gatheredData) {
+            // 合并获取的数据
+            Object.keys(newData.gatheredData).forEach(key => {
+                const data = newData.gatheredData[key];
+                if (data && data.success) {
+                    merged[key] = data;
+                }
+            });
+        }
+        
+        return merged;
+    }
+    
+    /**
+     * 从操作创建动作
+     */
+    async createActionFromOperation(operation, context) {
+        switch (operation.type) {
+            case 'create':
+                return this.createCreateAction(operation.target, operation.content || '');
+                
+            case 'edit':
+                return this.createAdvancedEditAction(operation, context);
+                
+            case 'delete':
+                return this.createDeleteAction(operation.target);
+                
+            case 'move':
+                return this.createMoveAction(operation.source, operation.target);
+                
+            case 'compile':
+                return this.createCompileAction(operation.target);
+                
+            default:
+                this.log('warn', `未知的操作类型: ${operation.type}`);
+                return null;
+        }
+    }
+    
+    /**
+     * 执行单个动作
+     */
+    async executeAction(action) {
+        // 这里应该调用实际的文件系统操作
+        // 暂时只记录日志
+        this.log('info', `执行动作: ${action.type} - ${action.target || action.description}`);
+        
+        // TODO: 实现实际的文件操作
+        // 例如：
+        // - 创建文件: await window.ide.fileSystem.writeFile(action.target, action.content)
+        // - 编辑文件: await window.ide.fileSystem.writeFile(action.target, action.content)
+        // - 删除文件: await window.ide.fileSystem.unlink(action.target)
+        // - 移动文件: await window.ide.fileSystem.rename(action.source, action.target)
+        
+        return true;
     }
     
     /**
@@ -479,7 +746,8 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
     }
     
     /**
-     * 分析任务并生成执行计划
+     * 分析任务并生成执行计划（旧版本，保留作为备用）
+     * 注意：新的两阶段模式使用 makeDecision 方法
      */
     async analyzeAndPlan(message, context, onStream = null) {
         try {
@@ -547,10 +815,13 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
     }
     
     /**
-     * 构建系统提示词
+     * 构建系统提示词（旧版本，保留作为备用）
+     * 注意：新的两阶段模式使用 buildDecisionSystemPrompt 方法
      */
     buildSystemPrompt() {
         let systemPrompt = `你是 LaTeX Master，一个智能的 LaTeX 文档助手。
+
+**⚠️ 注意：此提示词为旧版本，新版本使用两阶段决策模式**
 
 **🔧 工作模式说明：**
 
@@ -1466,6 +1737,251 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
             content: finalResponse
         };
     }
+    
+    /**
+     * 构建决策阶段的系统提示词
+     */
+    buildDecisionSystemPrompt() {
+        return `你是 LaTeX Master，一个智能的 LaTeX 文档助手。
+
+**🔧 两阶段工作模式：**
+
+你需要分析用户需求并决定下一步行动。你只能返回以下四种JSON格式之一：
+
+**1. 信息获取阶段（gather_info）**
+当你需要更多信息来完成任务时使用。只能使用只读工具：
+\`\`\`json
+{
+  "type": "gather_info",
+  "reasoning": "为什么需要获取这些信息",
+  "tools": [
+    {
+      "name": "read_file",
+      "parameters": {"file_path": "/path/to/file"}
+    },
+    {
+      "name": "list_files", 
+      "parameters": {"directory": "/path/to/dir"}
+    },
+    {
+      "name": "search_in_files",
+      "parameters": {"query": "搜索内容", "file_pattern": "*.tex"}
+    }
+  ]
+}
+\`\`\`
+
+**可用的只读工具：**
+- \`read_file\`: 读取文件内容
+- \`list_files\`: 列出目录文件
+- \`get_file_structure\`: 获取项目结构
+- \`search_in_files\`: 搜索文件内容
+- \`get_project_info\`: 获取项目信息
+- \`get_editor_state\`: 获取编辑器状态
+
+**2. 执行操作阶段（execute_operations）**
+当你有足够信息执行具体任务时使用。只能使用写入操作：
+\`\`\`json
+{
+  "type": "execute_operations",
+  "reasoning": "为什么执行这些操作",
+  "operations": [
+    {
+      "type": "create",
+      "description": "创建新文件",
+      "target": "/path/to/new/file.tex",
+      "content": "文件内容"
+    },
+    {
+      "type": "edit",
+      "description": "编辑现有文件",
+      "target": "/path/to/file.tex",
+      "editType": "replace",
+      "startLine": 1,
+      "endLine": -1,
+      "content": "新的文件内容"
+    }
+  ]
+}
+\`\`\`
+
+**可用的写入操作：**
+- \`create\`: 创建新文件
+- \`edit\`: 编辑现有文件（支持replace/insert/delete）
+- \`delete\`: 删除文件
+- \`move\`: 移动/重命名文件
+- \`compile\`: 编译LaTeX文档
+
+**3. 任务完成（complete_task）**
+当所有任务都已完成时使用：
+\`\`\`json
+{
+  "type": "complete_task",
+  "message": "任务完成的总结信息"
+}
+\`\`\`
+
+**4. 直接响应（direct_response）**
+当只需要回答问题而不需要文件操作时使用：
+\`\`\`json
+{
+  "type": "direct_response", 
+  "message": "直接回答用户的问题"
+}
+\`\`\`
+
+**决策规则：**
+1. 如果需要查看/分析现有文件但没有文件内容 → gather_info
+2. 如果需要搜索特定内容但不知道在哪个文件 → gather_info  
+3. 如果有足够信息可以执行具体操作 → execute_operations
+4. 如果所有操作都已完成 → complete_task
+5. 如果只是回答问题或提供建议 → direct_response
+
+**重要：**
+- 每次只返回一种类型的JSON
+- 信息获取阶段和执行操作阶段严格分离
+- 不要在同一个响应中混合读取和写入操作
+- 必须包含reasoning字段说明决策原因`;
+    }
+    
+    /**
+     * 构建决策阶段的用户提示词
+     */
+    buildDecisionUserPrompt(originalMessage, context, conversationHistory) {
+        let prompt = `**用户需求：** ${originalMessage}\n\n`;
+        
+        // 添加当前可用的上下文信息
+        prompt += `**当前上下文信息：**\n`;
+        
+        // 项目信息
+        if (context.project) {
+            prompt += `- 项目：${context.project.name || '未命名'} (${context.project.files || 0} 个文件)\n`;
+        }
+        
+        // 当前编辑器状态
+        if (context.editor && context.editor.filePath) {
+            prompt += `- 当前编辑文件：${context.editor.filePath}\n`;
+            if (context.editor.content) {
+                const preview = context.editor.content.substring(0, 200);
+                prompt += `- 文件内容预览：${preview}${context.editor.content.length > 200 ? '...' : ''}\n`;
+            }
+        }
+        
+        // 用户提供的上下文
+        if (context.userContextItems && context.userContextItems.length > 0) {
+            prompt += `- 用户提供的上下文：${context.userContextItems.length} 项\n`;
+            context.userContextItems.forEach((item, index) => {
+                prompt += `  ${index + 1}. ${item.type}: ${item.name}\n`;
+            });
+        }
+        
+        // 已获取的信息
+        const gatheredInfo = Object.keys(context).filter(key => 
+            ['read_file', 'list_files', 'get_file_structure', 'search_in_files', 'get_project_info'].includes(key)
+        );
+        if (gatheredInfo.length > 0) {
+            prompt += `- 已获取的信息：${gatheredInfo.join(', ')}\n`;
+        }
+        
+        prompt += '\n';
+        
+        // 添加对话历史
+        if (conversationHistory && conversationHistory.length > 0) {
+            prompt += `**执行历史：**\n`;
+            conversationHistory.forEach((entry, index) => {
+                prompt += `${index + 1}. [${entry.type}] `;
+                if (entry.type === 'gather_info') {
+                    const toolCount = entry.decision.tools?.length || 0;
+                    const successCount = Object.keys(entry.result.gatheredData || {}).length;
+                    prompt += `获取信息 (${successCount}/${toolCount} 成功)\n`;
+                } else if (entry.type === 'execute_operations') {
+                    const { completedSteps, totalSteps } = entry.result;
+                    prompt += `执行操作 (${completedSteps}/${totalSteps} 完成)\n`;
+                }
+            });
+            prompt += '\n';
+        }
+        
+        prompt += `**请分析上述信息，决定下一步行动。只返回一个JSON对象，不要包含其他文本。**`;
+        
+        return prompt;
+    }
+    
+    /**
+     * 解析决策响应
+     */
+    parseDecisionResponse(response) {
+        if (!response || typeof response !== 'string') {
+            this.log('warn', '决策响应为空或格式错误');
+            return null;
+        }
+        
+        try {
+            // 尝试直接解析JSON
+            let jsonStr = response.trim();
+            
+            // 如果响应包含代码块，提取JSON部分
+            const jsonMatch = jsonStr.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
+            if (jsonMatch) {
+                jsonStr = jsonMatch[1];
+            }
+            
+            // 如果没有代码块，查找第一个完整的JSON对象
+            const jsonStart = jsonStr.indexOf('{');
+            const jsonEnd = jsonStr.lastIndexOf('}');
+            if (jsonStart !== -1 && jsonEnd !== -1 && jsonEnd > jsonStart) {
+                jsonStr = jsonStr.substring(jsonStart, jsonEnd + 1);
+            }
+            
+            const decision = JSON.parse(jsonStr);
+            
+            // 验证决策格式
+            if (!decision.type) {
+                this.log('warn', '决策响应缺少type字段');
+                return null;
+            }
+            
+            const validTypes = ['gather_info', 'execute_operations', 'complete_task', 'direct_response'];
+            if (!validTypes.includes(decision.type)) {
+                this.log('warn', `无效的决策类型: ${decision.type}`);
+                return null;
+            }
+            
+            // 验证特定类型的必需字段
+            switch (decision.type) {
+                case 'gather_info':
+                    if (!decision.tools || !Array.isArray(decision.tools)) {
+                        this.log('warn', 'gather_info决策缺少tools数组');
+                        return null;
+                    }
+                    break;
+                    
+                case 'execute_operations':
+                    if (!decision.operations || !Array.isArray(decision.operations)) {
+                        this.log('warn', 'execute_operations决策缺少operations数组');
+                        return null;
+                    }
+                    break;
+                    
+                case 'complete_task':
+                case 'direct_response':
+                    if (!decision.message) {
+                        this.log('warn', `${decision.type}决策缺少message字段`);
+                        return null;
+                    }
+                    break;
+            }
+            
+            this.log('info', `解析决策成功: ${decision.type}`);
+            return decision;
+            
+        } catch (error) {
+            this.log('error', '决策响应JSON解析失败', error);
+            this.log('debug', '原始响应:', response);
+            return null;
+        }
+    }
+    
 }
 
 /**
