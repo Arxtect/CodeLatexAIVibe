@@ -1016,8 +1016,29 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
     mergeContext(existingContext, newData) {
         const merged = { ...existingContext };
         
+        // 处理工具调用结果
+        if (newData.toolCallResults) {
+            // 保留新的结构，同时也合并到根级别
+            merged.toolCallResults = { ...(merged.toolCallResults || {}), ...newData.toolCallResults };
+            merged.lastToolCallSummary = newData.lastToolCallSummary;
+            
+            // 将成功的工具调用结果也合并到根级别，用于兼容旧的读取方式
+            Object.keys(newData.toolCallResults).forEach(toolName => {
+                const result = newData.toolCallResults[toolName];
+                if (result && result.success) {
+                    merged[toolName] = result;
+                }
+            });
+        }
+        
+        // 处理执行结果
+        if (newData.executionResults) {
+            merged.executionResults = { ...(merged.executionResults || {}), ...newData.executionResults };
+            merged.lastExecutionSummary = newData.lastExecutionSummary;
+        }
+        
+        // 处理旧格式的gatheredData（向后兼容）
         if (newData.gatheredData) {
-            // 合并获取的数据
             Object.keys(newData.gatheredData).forEach(key => {
                 const data = newData.gatheredData[key];
                 if (data && data.success) {
@@ -2634,16 +2655,24 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
 - \`compile\`: 编译LaTeX文档
 
 **决策原则：**
-1. 如果需要查看/分析现有文件但没有足够信息 → 使用工具调用（只读）
-2. 如果需要搜索特定内容但不知道在哪个文件 → 使用工具调用（只读）
-3. 如果有足够信息可以执行具体操作 → 在回答中包含操作指令
-4. 如果只是回答问题或提供建议 → 直接回答
-5. **如果任务已完成或无需进一步操作 → 直接回答并总结完成情况**
+1. **检查已获取的信息**：仔细检查上下文中的"具体获取的信息"部分，如果已经有足够信息，不要重复获取
+2. 如果需要查看/分析现有文件但没有足够信息 → 使用工具调用（只读）
+3. 如果需要搜索特定内容但不知道在哪个文件 → 使用工具调用（只读）
+4. **如果已经获取了足够信息可以执行具体操作** → 在回答中包含操作指令
+5. 如果只是回答问题或提供建议 → 直接回答
+6. **如果任务已完成或无需进一步操作** → 直接回答并总结完成情况
+
+**关键判断标准：**
+- 如果上下文中已经显示了相关文件的内容，不要重复读取
+- 如果上下文中已经显示了文件列表，不要重复获取
+- 如果上下文中已经显示了搜索结果，不要重复搜索
+- **基于已获取的具体信息进行决策，而不是一直获取更多信息**
 
 **完成条件（重要）：**
 - 当你已经完成了用户请求的所有操作时，直接回答总结结果，不要继续调用工具或执行操作
 - 当你已经提供了用户需要的信息或建议时，直接回答，不要继续获取更多信息
 - 当用户的问题是简单的询问时，直接回答，不需要文件操作
+- **当你看到上下文中已经有足够的信息来回答用户问题时，直接基于这些信息回答**
 - 避免重复执行相同的操作或获取相同的信息
 
 **重要：**
@@ -2693,6 +2722,63 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
             if (accumulatedContext.lastToolCallSummary) {
                 message += `  最近获取：${accumulatedContext.lastToolCallSummary}\n`;
             }
+            
+            // 添加具体的工具调用结果内容
+            message += `\n**具体获取的信息：**\n`;
+            Object.keys(accumulatedContext.toolCallResults).forEach(toolName => {
+                const result = accumulatedContext.toolCallResults[toolName];
+                if (result && result.success) {
+                    message += `\n📄 **${toolName}**:\n`;
+                    
+                    if (toolName === 'read_file' && result.content) {
+                        const filePath = result.file_path || '未知文件';
+                        const contentPreview = result.content.length > 800 
+                            ? result.content.substring(0, 800) + '\n... (内容过长，已截断)'
+                            : result.content;
+                        message += `- 文件路径: ${filePath}\n`;
+                        message += `- 文件内容:\n\`\`\`\n${contentPreview}\n\`\`\`\n`;
+                    } else if (toolName === 'list_files' && result.files) {
+                        message += `- 找到 ${result.files.length} 个文件/目录:\n`;
+                        result.files.slice(0, 20).forEach(file => {
+                            message += `  - ${file.type === 'directory' ? '📁' : '📄'} ${file.name} (${file.path})\n`;
+                        });
+                        if (result.files.length > 20) {
+                            message += `  ... 还有 ${result.files.length - 20} 个文件/目录\n`;
+                        }
+                    } else if (toolName === 'search_in_files' && result.results) {
+                        message += `- 搜索结果: 找到 ${result.results.length} 个匹配项\n`;
+                        result.results.slice(0, 10).forEach(match => {
+                            message += `  - ${match.file_path}:${match.line_number}: ${match.line_content.trim()}\n`;
+                        });
+                        if (result.results.length > 10) {
+                            message += `  ... 还有 ${result.results.length - 10} 个匹配项\n`;
+                        }
+                    } else if (toolName === 'get_file_structure' && result.structure) {
+                        const structurePreview = typeof result.structure === 'string' 
+                            ? (result.structure.length > 500 ? result.structure.substring(0, 500) + '\n... (结构过长，已截断)' : result.structure)
+                            : JSON.stringify(result.structure, null, 2);
+                        message += `- 项目结构:\n\`\`\`\n${structurePreview}\n\`\`\`\n`;
+                    } else if (toolName === 'get_project_info') {
+                        message += `- 项目信息: ${result.total_files || 0} 个文件, ${result.total_directories || 0} 个目录\n`;
+                        if (result.files_by_type) {
+                            message += `- 文件类型分布:\n`;
+                            Object.keys(result.files_by_type).forEach(type => {
+                                const typeInfo = result.files_by_type[type];
+                                message += `  - .${type}: ${typeInfo.count} 个文件\n`;
+                            });
+                        }
+                    } else {
+                        // 其他工具调用结果的通用处理
+                        const resultSummary = JSON.stringify(result, null, 2);
+                        const preview = resultSummary.length > 300 
+                            ? resultSummary.substring(0, 300) + '\n... (结果过长，已截断)'
+                            : resultSummary;
+                        message += `- 结果:\n\`\`\`json\n${preview}\n\`\`\`\n`;
+                    }
+                } else if (result && !result.success) {
+                    message += `\n❌ **${toolName}**: 失败 - ${result.error || '未知错误'}\n`;
+                }
+            });
         }
         
         // 执行结果
@@ -2702,6 +2788,23 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
             if (accumulatedContext.lastExecutionSummary) {
                 message += `  最近执行：${accumulatedContext.lastExecutionSummary}\n`;
             }
+            
+            // 添加具体的执行结果内容
+            message += `\n**具体执行结果：**\n`;
+            Object.keys(accumulatedContext.executionResults).forEach(key => {
+                const result = accumulatedContext.executionResults[key];
+                if (result && result.operation) {
+                    const op = result.operation;
+                    const status = result.success ? '✅' : '❌';
+                    message += `${status} **${op.type}**: ${op.description}\n`;
+                    if (op.target) {
+                        message += `   - 目标: ${op.target}\n`;
+                    }
+                    if (result.error) {
+                        message += `   - 错误: ${result.error}\n`;
+                    }
+                }
+            });
         }
         
         message += '\n';
@@ -2789,7 +2892,41 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
      * 处理工具调用并过滤只读操作
      */
     async handleToolCallsWithReadOnlyFilter(response, context) {
-        const toolCalls = response.content.tool_calls || [];
+        // 检查响应结构，获取工具调用数组
+        let toolCalls = [];
+        
+        if (response.isToolCallResponse && response.content) {
+            // 从原始的工具调用响应中获取
+            if (response.content.tool_calls && Array.isArray(response.content.tool_calls)) {
+                toolCalls = response.content.tool_calls;
+            } else if (response.content.message && response.content.message.tool_calls) {
+                toolCalls = response.content.message.tool_calls;
+            }
+        } else if (response.tool_calls && Array.isArray(response.tool_calls)) {
+            toolCalls = response.tool_calls;
+        } else if (response.content && response.content.tool_calls) {
+            toolCalls = response.content.tool_calls;
+        }
+        
+        console.log('工具调用处理调试:', {
+            responseType: typeof response,
+            isToolCallResponse: response.isToolCallResponse,
+            toolCallsCount: toolCalls.length,
+            responseStructure: Object.keys(response),
+            contentStructure: response.content ? Object.keys(response.content) : null
+        });
+        
+        // 如果没有找到工具调用，返回空结果
+        if (!toolCalls || toolCalls.length === 0) {
+            this.log('warn', '响应中没有找到有效的工具调用');
+            return {
+                results: {},
+                summary: '0/0 个工具调用成功',
+                successCount: 0,
+                totalCount: 0
+            };
+        }
+        
         const results = {};
         let successCount = 0;
         let summary = '';
