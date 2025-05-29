@@ -89,6 +89,20 @@ export class AgentPanelPlugin {
                     </div>
                 </div>
                 
+                <!-- 操作历史面板 -->
+                <div class="operation-history-panel" id="operation-history-panel" style="display: none;">
+                    <div class="operation-history-header">
+                        <h3>📜 操作历史</h3>
+                        <div class="operation-history-controls">
+                            <button class="btn-small" id="clear-operation-history-btn" title="清空历史">🗑️</button>
+                            <button class="btn-small" id="hide-operation-history-btn" title="隐藏">×</button>
+                        </div>
+                    </div>
+                    <div class="operation-history-content" id="operation-history-content">
+                        <!-- 操作历史将在这里显示 -->
+                    </div>
+                </div>
+                
                 <!-- 输入区域 -->
                     <div class="chat-input-container">
                     <!-- 上下文管理区域 -->
@@ -1096,6 +1110,299 @@ export class AgentPanelPlugin {
             .execution-task-panel .tool-call-progress-fill {
                 background: linear-gradient(90deg, #8e44ad, #6c3483);
             }
+            
+            /* 文件选择器样式 */
+            .file-tree-modal {
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0, 0, 0, 0.7);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                z-index: 10000;
+            }
+            
+            /* 操作历史面板样式 */
+            .operation-history-panel {
+                background: var(--bg-color, #ffffff);
+                border-top: 1px solid var(--border-color, #e0e0e0);
+                max-height: 300px;
+                display: flex;
+                flex-direction: column;
+            }
+            
+            .operation-history-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: 8px 12px;
+                background: var(--header-bg, #f8f9fa);
+                border-bottom: 1px solid var(--border-color, #e0e0e0);
+                font-size: 13px;
+            }
+            
+            .operation-history-header h3 {
+                margin: 0;
+                color: var(--text-color, #333);
+                font-size: 13px;
+                font-weight: 600;
+            }
+            
+            .operation-history-controls {
+                display: flex;
+                gap: 4px;
+            }
+            
+            .operation-history-content {
+                flex: 1;
+                overflow-y: auto;
+                padding: 4px;
+            }
+            
+            .operation-history-list {
+                display: flex;
+                flex-direction: column;
+                gap: 2px;
+            }
+            
+            /* 操作卡片样式 */
+            .operation-card {
+                border: 1px solid var(--border-color, #e0e0e0);
+                border-radius: 6px;
+                background: var(--bg-color, #ffffff);
+                transition: all 0.2s ease;
+            }
+            
+            .operation-card:hover {
+                background: var(--hover-bg, #f8f9fa);
+                border-color: var(--primary-color, #007bff);
+            }
+            
+            .operation-card.operation-read {
+                border-left: 3px solid #28a745;
+            }
+            
+            .operation-card.operation-write {
+                border-left: 3px solid #6f42c1;
+            }
+            
+            .operation-card.operation-complete {
+                border-left: 3px solid #007bff;
+            }
+            
+            /* 紧凑卡片样式 */
+            .operation-card.compact {
+                padding: 6px 8px;
+                font-size: 12px;
+                cursor: pointer;
+            }
+            
+            .compact-operation-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 2px;
+            }
+            
+            .compact-operation-left {
+                display: flex;
+                align-items: center;
+                gap: 4px;
+                flex: 1;
+                min-width: 0;
+            }
+            
+            .compact-operation-right {
+                font-size: 10px;
+                color: var(--muted-color, #666);
+                white-space: nowrap;
+            }
+            
+            .operation-number {
+                font-size: 10px;
+                color: var(--muted-color, #666);
+                font-weight: 500;
+                min-width: 20px;
+            }
+            
+            .operation-status {
+                font-size: 10px;
+            }
+            
+            .operation-type-icon {
+                font-size: 10px;
+            }
+            
+            .operation-action {
+                font-weight: 500;
+                color: var(--text-color, #333);
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                max-width: 80px;
+            }
+            
+            .compact-operation-details {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                font-size: 10px;
+                color: var(--muted-color, #666);
+            }
+            
+            .operation-target {
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                max-width: 120px;
+            }
+            
+            .operation-result {
+                font-style: italic;
+                white-space: nowrap;
+            }
+            
+            /* 展开内容样式 */
+            .expanded-content {
+                display: none;
+                margin-top: 6px;
+                padding-top: 6px;
+                border-top: 1px solid var(--border-color, #e0e0e0);
+                font-size: 11px;
+                color: var(--muted-color, #666);
+            }
+            
+            .operation-card.expanded .expanded-content {
+                display: block;
+            }
+            
+            /* 普通卡片样式（保持原有） */
+            .operation-card:not(.compact) {
+                padding: 12px;
+                margin-bottom: 8px;
+            }
+            
+            .operation-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 8px;
+            }
+            
+            .operation-title {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                font-weight: 500;
+            }
+            
+            .operation-time {
+                font-size: 11px;
+                color: var(--muted-color, #666);
+            }
+            
+            .operation-content {
+                font-size: 12px;
+                color: var(--muted-color, #666);
+                line-height: 1.4;
+            }
+            
+            .operation-card.read {
+                border-left: 3px solid #28a745;
+            }
+            
+            .operation-card.write {
+                border-left: 3px solid #6f42c1;
+            }
+            
+            .operation-card.complete {
+                border-left: 3px solid #007bff;
+            }
+            
+            .operation-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 4px;
+            }
+            
+            .operation-title {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                font-weight: 500;
+                font-size: 13px;
+                color: var(--text-color, #333);
+            }
+            
+            .operation-number {
+                background: var(--bg-secondary, #f8f9fa);
+                border: 1px solid var(--border-color, #e0e0e0);
+                border-radius: 12px;
+                padding: 2px 6px;
+                font-size: 11px;
+                font-weight: 600;
+                color: var(--text-secondary, #666);
+                min-width: 20px;
+                text-align: center;
+            }
+            
+            .operation-status {
+                font-size: 12px;
+            }
+            
+            .operation-status.success {
+                color: #28a745;
+            }
+            
+            .operation-status.error {
+                color: #dc3545;
+            }
+            
+            .operation-details {
+                font-size: 12px;
+                color: var(--text-secondary, #666);
+                margin-bottom: 6px;
+            }
+            
+            .operation-timestamp {
+                font-size: 11px;
+                color: var(--text-tertiary, #999);
+                text-align: right;
+            }
+            
+            .operation-content-preview {
+                background: var(--bg-secondary, #f8f9fa);
+                border: 1px solid var(--border-color, #e0e0e0);
+                border-radius: 3px;
+                padding: 6px;
+                margin-top: 4px;
+                font-family: 'Monaco', 'Consolas', monospace;
+                font-size: 11px;
+                max-height: 60px;
+                overflow-y: auto;
+                white-space: pre-wrap;
+            }
+            
+            .btn-small {
+                width: 20px;
+                height: 20px;
+                border: none;
+                background: transparent;
+                cursor: pointer;
+                border-radius: 3px;
+                font-size: 12px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+            
+            .btn-small:hover {
+                background: var(--bg-secondary, #f8f9fa);
+            }
         `;
         
         document.head.appendChild(styles);
@@ -1140,9 +1447,7 @@ export class AgentPanelPlugin {
                 this.sendMessage();
             });
         
-        clearBtn.addEventListener('click', () => {
-            this.clearChat();
-        });
+        clearBtn.addEventListener('click', () => this.clearChat());
         
         newConversationBtn.addEventListener('click', () => {
             this.newConversation();
@@ -1159,6 +1464,43 @@ export class AgentPanelPlugin {
         
         // 拖拽功能
         this.setupDragAndDrop();
+        
+        // 操作历史面板事件
+        const hideOperationHistoryBtn = this.panel.querySelector('#hide-operation-history-btn');
+        const clearOperationHistoryBtn = this.panel.querySelector('#clear-operation-history-btn');
+        
+        if (hideOperationHistoryBtn) {
+            hideOperationHistoryBtn.addEventListener('click', () => this.hideOperationHistory());
+        }
+        
+        if (clearOperationHistoryBtn) {
+            clearOperationHistoryBtn.addEventListener('click', () => this.clearOperationHistory());
+        }
+        
+        console.log('Agent面板事件监听器已设置');
+        
+        // 新建对话按钮
+        const newConversationBtn2 = document.getElementById('chat-new-conversation-btn');
+        if (newConversationBtn2) {
+            newConversationBtn2.addEventListener('click', () => {
+                this.newConversation();
+            });
+        }
+        
+        // **新增：操作历史面板事件监听器**
+        const clearHistoryBtn = document.getElementById('clear-operation-history-btn');
+        if (clearHistoryBtn) {
+            clearHistoryBtn.addEventListener('click', () => {
+                this.clearOperationHistory();
+            });
+        }
+        
+        const hideHistoryBtn = document.getElementById('hide-operation-history-btn');
+        if (hideHistoryBtn) {
+            hideHistoryBtn.addEventListener('click', () => {
+                this.hideOperationHistory();
+            });
+        }
     }
     
     /**
@@ -1175,6 +1517,12 @@ export class AgentPanelPlugin {
         window.addSelectionToContext = () => this.addSelectionToContext();
         window.addCurrentFileToContext = () => this.addCurrentFileToContext();
         window.addFileToContextByPath = (filePath) => this.addFileToContextByPath(filePath);
+        
+        // 添加操作历史函数
+        window.renderOperationHistory = (operationHistory) => this.renderOperationHistory(operationHistory);
+        window.showOperationHistory = () => this.showOperationHistory();
+        window.hideOperationHistory = () => this.hideOperationHistory();
+        window.toggleOperationHistory = () => this.toggleOperationHistory();
         
         // 注册右键菜单项
         this.registerContextMenuItems();
@@ -3651,6 +3999,283 @@ export class AgentPanelPlugin {
                 const paramInfo = Object.keys(args).length > 0 ? 
                     ` (${Object.keys(args).slice(0, 3).map(key => `${key}: ${String(args[key]).substring(0, 20)}`).join(', ')})` : '';
                 return `🔧 ${functionName}${paramInfo}`;
+        }
+    }
+    
+    /**
+     * 渲染操作历史
+     */
+    renderOperationHistory(operationHistory) {
+        console.log('渲染操作历史:', operationHistory.length, '个操作');
+        
+        if (!operationHistory || operationHistory.length === 0) {
+            this.hideOperationHistory();
+            return;
+        }
+        
+        // **修改：使用内嵌面板而不是独立模态窗口**
+        const panel = document.getElementById('operation-history-panel');
+        const content = document.getElementById('operation-history-content');
+        
+        if (!panel || !content) {
+            console.warn('操作历史面板元素未找到');
+            return;
+        }
+        
+        // 显示操作历史面板
+        panel.style.display = 'block';
+        
+        // 清空现有内容
+        content.innerHTML = '';
+        
+        // 创建操作历史列表
+        const historyList = document.createElement('div');
+        historyList.className = 'operation-history-list';
+        
+        // 按时间倒序显示（最新的在前面）
+        const sortedHistory = [...operationHistory].reverse();
+        
+        sortedHistory.forEach((historyItem, index) => {
+            const card = this.createCompactOperationCard(historyItem, operationHistory.length - index);
+            historyList.appendChild(card);
+        });
+        
+        content.appendChild(historyList);
+        
+        // 自动滚动到最新操作
+        setTimeout(() => {
+            const firstCard = historyList.querySelector('.operation-card');
+            if (firstCard) {
+                firstCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+        }, 100);
+    }
+    
+    /**
+     * 创建操作卡片
+     */
+    createOperationCard(historyItem, operationNumber) {
+        const { operation, result, timestamp } = historyItem;
+        
+        const card = document.createElement('div');
+        card.className = `operation-card operation-${operation.type}`;
+        
+        const statusIcon = result.success ? '✅' : '❌';
+        const typeIcon = operation.type === 'read' ? '🟢' : operation.type === 'write' ? '🟣' : '🔵';
+        const typeText = operation.type === 'read' ? '读取' : operation.type === 'write' ? '写入' : '完成';
+        
+        const timeStr = new Date(timestamp).toLocaleTimeString('zh-CN', { 
+            hour12: false,
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit'
+        });
+        
+        const contentPreview = this.createOperationContentPreview(operation, result);
+        
+        card.innerHTML = `
+            <div class="operation-header">
+                <div class="operation-title">
+                    <span class="operation-number">#${operationNumber}</span>
+                    <span class="operation-status">${statusIcon}</span>
+                    <span class="operation-type">${typeIcon} ${typeText}</span>
+                    <span class="operation-action">${operation.action || 'complete'}</span>
+                </div>
+                <div class="operation-time">${timeStr}</div>
+            </div>
+            <div class="operation-content">
+                ${contentPreview}
+            </div>
+        `;
+        
+        return card;
+    }
+    
+    /**
+     * **新增：创建紧凑操作卡片（适合内嵌显示）**
+     */
+    createCompactOperationCard(historyItem, operationNumber) {
+        const { operation, result, timestamp } = historyItem;
+        
+        const card = document.createElement('div');
+        card.className = `operation-card compact operation-${operation.type}`;
+        
+        const statusIcon = result.success ? '✅' : '❌';
+        const typeIcon = operation.type === 'read' ? '🟢' : operation.type === 'write' ? '🟣' : '🔵';
+        
+        const timeStr = new Date(timestamp).toLocaleTimeString('zh-CN', { 
+            hour12: false,
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+        
+        // 获取操作目标
+        let target = '';
+        if (operation.parameters?.file_path) {
+            target = operation.parameters.file_path.split('/').pop(); // 只显示文件名
+        } else if (operation.parameters?.directory_path) {
+            target = operation.parameters.directory_path;
+        } else if (operation.action === 'get_file_structure') {
+            target = '项目结构';
+        } else if (operation.action === 'get_project_info') {
+            target = '项目信息';
+        }
+        
+        // 创建简洁的结果摘要
+        let resultSummary = '';
+        if (result.success) {
+            if (operation.type === 'read') {
+                if (result.content) {
+                    resultSummary = `${result.content.length} 字符`;
+                } else if (result.files) {
+                    resultSummary = `${result.files.length} 个文件`;
+                } else if (result.structure) {
+                    resultSummary = '结构已获取';
+                } else {
+                    resultSummary = '成功';
+                }
+            } else if (operation.type === 'write') {
+                resultSummary = '已完成';
+            } else {
+                resultSummary = '已完成';
+            }
+        } else {
+            resultSummary = '失败';
+        }
+        
+        card.innerHTML = `
+            <div class="compact-operation-header">
+                <div class="compact-operation-left">
+                    <span class="operation-number">#${operationNumber}</span>
+                    <span class="operation-status">${statusIcon}</span>
+                    <span class="operation-type-icon">${typeIcon}</span>
+                    <span class="operation-action">${operation.action || 'complete'}</span>
+                </div>
+                <div class="compact-operation-right">
+                    <span class="operation-time">${timeStr}</span>
+                </div>
+            </div>
+            <div class="compact-operation-details">
+                ${target ? `<span class="operation-target">📁 ${target}</span>` : ''}
+                <span class="operation-result">${resultSummary}</span>
+            </div>
+        `;
+        
+        // 添加点击展开功能
+        card.addEventListener('click', () => {
+            card.classList.toggle('expanded');
+            if (card.classList.contains('expanded')) {
+                const fullContent = this.createOperationContentPreview(operation, result);
+                let expandedDiv = card.querySelector('.expanded-content');
+                if (!expandedDiv) {
+                    expandedDiv = document.createElement('div');
+                    expandedDiv.className = 'expanded-content';
+                    expandedDiv.innerHTML = fullContent;
+                    card.appendChild(expandedDiv);
+                }
+                expandedDiv.style.display = 'block';
+            } else {
+                const expandedDiv = card.querySelector('.expanded-content');
+                if (expandedDiv) {
+                    expandedDiv.style.display = 'none';
+                }
+            }
+        });
+        
+        return card;
+    }
+    
+    /**
+     * 创建操作内容预览
+     */
+    createOperationContentPreview(operation, result) {
+        let preview = '';
+        
+        if (operation.type === 'read' && result.success) {
+            if (operation.action === 'read_file' && result.content) {
+                const content = result.content.substring(0, 200);
+                preview = `<div class="operation-content-preview">${content}${result.content.length > 200 ? '...' : ''}</div>`;
+            } else if (operation.action === 'list_files' && result.files) {
+                const fileList = result.files.slice(0, 5).map(f => f.name || f).join(', ');
+                preview = `<div class="operation-content-preview">📁 ${fileList}${result.files.length > 5 ? '...' : ''}</div>`;
+            } else if (operation.action === 'get_file_structure' && result.structure) {
+                // 修复：检查result.structure的类型并进行适当转换
+                let structureText = '';
+                if (typeof result.structure === 'string') {
+                    structureText = result.structure;
+                } else if (typeof result.structure === 'object') {
+                    structureText = JSON.stringify(result.structure, null, 2);
+                } else {
+                    structureText = String(result.structure);
+                }
+                
+                const structure = structureText.substring(0, 150);
+                preview = `<div class="operation-content-preview">${structure}${structureText.length > 150 ? '...' : ''}</div>`;
+            }
+        } else if (operation.type === 'write' && result.success) {
+            if (operation.parameters && operation.parameters.content) {
+                const content = operation.parameters.content.substring(0, 200);
+                preview = `<div class="operation-content-preview">${content}${operation.parameters.content.length > 200 ? '...' : ''}</div>`;
+            } else if (result.message) {
+                preview = `<div class="operation-content-preview">✅ ${result.message}</div>`;
+            }
+        } else if (operation.type === 'complete') {
+            preview = `<div class="operation-content-preview">🎉 ${operation.message || result.message}</div>`;
+        }
+        
+        return preview;
+    }
+    
+    /**
+     * 显示操作历史面板
+     */
+    showOperationHistory() {
+        const panel = document.getElementById('operation-history-panel');
+        const chatContainer = document.getElementById('chat-container');
+        
+        if (panel && chatContainer) {
+            panel.style.display = 'flex';
+            chatContainer.style.display = 'none';
+        }
+    }
+    
+    /**
+     * 隐藏操作历史面板
+     */
+    hideOperationHistory() {
+        const panel = document.getElementById('operation-history-panel');
+        if (panel) {
+            panel.style.display = 'none';
+        }
+    }
+    
+    /**
+     * 切换操作历史面板显示状态
+     */
+    toggleOperationHistory() {
+        const panel = document.getElementById('operation-history-panel');
+        
+        if (panel) {
+            if (panel.style.display === 'none' || panel.style.display === '') {
+                this.showOperationHistory();
+            } else {
+                this.hideOperationHistory();
+            }
+        }
+    }
+    
+    /**
+     * 清空操作历史
+     */
+    clearOperationHistory() {
+        const content = document.getElementById('operation-history-content');
+        if (content) {
+            content.innerHTML = `
+                <div style="text-align: center; padding: 20px; color: #666;">
+                    <p>🎯 操作历史已清空</p>
+                    <p style="font-size: 12px;">新的操作将在这里显示</p>
+                </div>
+            `;
         }
     }
 } 

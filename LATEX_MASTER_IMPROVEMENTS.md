@@ -1,5 +1,215 @@
 # LaTeX Master Agent 改进总结
 
+## 🆕 最新改进 (2024年12月19日)
+
+### 🔧 AI响应格式自动修复系统
+
+**问题**: AI有时会返回错误的操作格式，如 `{"type": "get_project_info"}` 而不是正确的 `{"type": "read", "action": "get_project_info"}`
+
+**解决方案**: 在 `LatexMasterAgentPlugin.js` 中添加了智能格式修复功能
+
+#### 新增方法：
+- `autoFixOperationFormat(operation)` - 自动修复AI响应格式错误
+
+#### 修复能力：
+1. **Action作为Type错误修复**：自动将错误放置的action移动到正确字段
+2. **字段名推断**：从 `tool_name` 推断 `action`，从 `args` 推断 `parameters`
+3. **Type自动推断**：根据action自动推断操作类型（read/write）
+4. **完成任务格式统一**：处理不同的完成任务表示方式
+
+#### 支持的操作映射：
+```javascript
+// 读操作
+const readActions = [
+    'read_file', 'list_files', 'get_file_structure', 'search_in_files',
+    'get_project_info', 'get_current_file', 'get_editor_state',
+    'get_selection', 'get_cursor_position', 'get_open_tabs', 'get_recent_changes'
+];
+
+// 写操作  
+const writeActions = [
+    'create_file', 'edit_file', 'delete_file', 'create_directory',
+    'delete_directory', 'move_file', 'rename_file', 'write_file'
+];
+```
+
+### 🎯 系统提示词重新设计
+
+**改进内容：**
+- 🚨 **格式要求突出显示**：在提示词顶部明确标注格式要求
+- ✅ **正确示例展示**：提供详细的正确格式示例
+- ❌ **错误示例警告**：明确标注常见错误格式
+- 📋 **操作清单详细化**：为每个操作提供具体的参数说明
+
+**新的系统提示词结构：**
+1. 格式要求（必须严格遵守）
+2. 错误与正确示例对比
+3. 详细操作清单（含参数说明）
+4. 完整操作示例
+5. 关键原则总结
+
+### 🎮 任务控制系统完善
+
+#### 新增任务状态管理：
+```javascript
+// 任务控制属性
+this.shouldPauseTask = false;
+this.currentTaskId = null;
+this.isExecuting = false;
+this.operationHistory = [];
+```
+
+#### 新增方法：
+- `initTaskState()` - 初始化任务状态
+- `resetTaskState()` - 重置任务状态  
+- `pauseCurrentTask()` - 暂停当前任务
+- `resumeCurrentTask()` - 恢复当前任务
+- `checkTaskPause()` - 检查任务暂停状态
+- `updateOperationHistoryUI(operationHistory)` - 更新操作历史UI
+
+#### 暂停检查集成：
+在主执行循环中集成了暂停检查，确保任务可以及时响应用户的暂停请求。
+
+### 📈 操作历史实时更新
+
+**功能：** 
+- 实时记录每个操作的详细信息
+- 区分操作类型（读/写/完成）
+- 提供操作时间戳和序号
+- 支持UI实时更新
+
+**历史项格式：**
+```javascript
+const historyItem = {
+    operation,           // 原始操作对象
+    result: operationResult,  // 执行结果
+    timestamp: new Date().toISOString(),  // 时间戳
+    operationNumber: operationCount,      // 操作序号
+    type: operation.type                  // 操作类型
+};
+```
+
+### 🛡️ 错误处理增强
+
+**改进点：**
+- 在所有可能的退出点添加 `resetTaskState()` 调用
+- 详细的错误日志记录
+- 智能格式修复的日志输出
+- 操作执行状态的实时反馈
+
+### 🔧 简化操作逻辑（2024年12月19日）
+
+**问题**: `need_return` 参数增加了不必要的复杂性，在单步执行模式中，AI需要根据每一步的操作结果来决定下一步，所以所有操作都应该返回完整结果。
+
+**解决方案**: 完全移除 `need_return` 相关逻辑
+
+#### 修改内容：
+1. **系统提示词简化**：
+   - 移除 `need_return` 参数说明
+   - 简化格式要求，只需要 `type`, `action`, `parameters`, `reasoning`
+   - 更新操作示例，去除 `need_return` 字段
+
+2. **格式修复逻辑简化**：
+   - `autoFixOperationFormat()` 方法中移除 `need_return` 处理
+   - 统一所有读操作格式，不再区分是否需要返回值
+
+3. **操作执行逻辑简化**：
+   - `executeReadOperation()` 方法始终返回完整结果
+   - 移除摘要生成逻辑，删除 `createOperationSummary()` 方法
+   - 所有操作都提供完整上下文给AI
+
+4. **操作历史显示优化**：
+   - 移除 `need_return` 条件判断
+   - 所有读操作结果都完整显示在操作历史中
+   - 简化消息构建逻辑
+
+### 🐛 操作历史UI错误修复（2024年12月19日）
+
+**问题**: `createOperationContentPreview` 方法中出现 `result.structure.substring is not a function` 错误
+
+**原因**: `result.structure` 可能是对象类型而不是字符串，直接调用字符串方法会报错
+
+**解决方案**: 添加类型检查和转换逻辑
+- 检查 `result.structure` 的数据类型
+- 如果是字符串则直接使用
+- 如果是对象则转换为JSON字符串格式  
+- 其他类型则转换为字符串
+
+**修复代码**:
+```javascript
+let structureText = '';
+if (typeof result.structure === 'string') {
+    structureText = result.structure;
+} else if (typeof result.structure === 'object') {
+    structureText = JSON.stringify(result.structure, null, 2);
+} else {
+    structureText = String(result.structure);
+}
+```
+
+#### 技术效果：
+- **代码简化**：减少了约50行相关逻辑代码
+- **逻辑统一**：所有操作都遵循相同的结果返回模式
+- **AI体验改善**：AI始终获得完整信息，决策更准确
+- **维护性提升**：减少了条件分支，代码更易理解和维护
+- **错误修复**：解决了操作历史显示中的类型错误
+
+### 🔧 简化操作逻辑（2024年12月19日）
+
+**问题**: `need_return` 参数增加了不必要的复杂性，在单步执行模式中，AI需要根据每一步的操作结果来决定下一步，所以所有操作都应该返回完整结果。
+
+**解决方案**: 完全移除 `need_return` 相关逻辑
+
+#### 修改内容：
+1. **系统提示词简化**：
+   - 移除 `need_return` 参数说明
+   - 简化格式要求，只需要 `type`, `action`, `parameters`, `reasoning`
+   - 更新操作示例，去除 `need_return` 字段
+
+2. **格式修复逻辑简化**：
+   - `autoFixOperationFormat()` 方法中移除 `need_return` 处理
+   - 统一所有读操作格式，不再区分是否需要返回值
+
+3. **操作执行逻辑简化**：
+   - `executeReadOperation()` 方法始终返回完整结果
+   - 移除摘要生成逻辑，删除 `createOperationSummary()` 方法
+   - 所有操作都提供完整上下文给AI
+
+4. **操作历史显示优化**：
+   - 移除 `need_return` 条件判断
+   - 所有读操作结果都完整显示在操作历史中
+   - 简化消息构建逻辑
+
+#### 技术效果：
+- **代码简化**：减少了约50行相关逻辑代码
+- **逻辑统一**：所有操作都遵循相同的结果返回模式
+- **AI体验改善**：AI始终获得完整信息，决策更准确
+- **维护性提升**：减少了条件分支，代码更易理解和维护
+
+#### 更新的格式示例：
+```javascript
+// 简化后的读操作格式
+{
+  "type": "read",
+  "action": "get_project_info", 
+  "parameters": {},
+  "reasoning": "需要了解项目的基本信息"
+}
+
+// 写操作格式保持不变
+{
+  "type": "write",
+  "action": "create_file",
+  "parameters": {
+    "file_path": "/test.tex",
+    "content": "文件内容"
+  },
+  "reasoning": "创建测试文件"
+}
+```
+
+---
+
 ## 🚀 主要改进
 
 ### 1. 修复 OpenAI API 调用问题

@@ -42,6 +42,12 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
         
         // 工具调用管理器
         this.toolCallManager = null;
+        
+        // **新增：任务控制属性**
+        this.shouldPauseTask = false;
+        this.currentTaskId = null;
+        this.isExecuting = false;
+        this.operationHistory = [];
     }
     
     onInit() {
@@ -294,7 +300,7 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
     }
     
     /**
-     * 处理用户消息的主入口 - 实现两阶段循环逻辑
+     * 处理用户消息的主入口 - 重新设计为灵活的单操作模式
      */
     async processMessage(message, context, onStream = null) {
         try {
@@ -319,164 +325,157 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
             
             this.log('info', `开始处理消息: ${message}`);
             
+            // **新增：初始化任务状态**
+            this.initTaskState();
+            
             // 收集初始上下文
             let fullContext = await this.collectContext(message, context);
             
-            // 初始化循环控制
-            let maxIterations = 15;
-            let iteration = 0;
-            let conversationHistory = []; // 存储整个对话历史
-            let accumulatedContext = { ...fullContext }; // 累积的上下文信息
+            // 初始化操作历史
+            let operationHistory = [];
+            let maxOperations = 20; // 最大操作次数
+            let operationCount = 0;
             
             while (true) {
-                iteration++;
-                this.log('info', `处理迭代 ${iteration}/${maxIterations}`);
+                // **新增：检查任务暂停**
+                if (this.shouldPauseTask) {
+                    this.log('info', '任务被用户暂停');
+                    this.resetTaskState();
+                    return this.createResponse(
+                        `⏸️ 任务已暂停\n\n` +
+                        `执行摘要：\n` +
+                        `- 总操作次数: ${operationCount}\n` +
+                        `- 读操作: ${operationHistory.filter(h => h.operation.type === 'read').length} 次\n` +
+                        `- 写操作: ${operationHistory.filter(h => h.operation.type === 'write').length} 次\n\n` +
+                        `任务已暂停，可稍后继续。`
+                    );
+                }
                 
-                // 检查是否达到软限制
-                if (iteration > maxIterations) {
-                    this.log('warn', `达到迭代软限制 ${maxIterations}，请求用户确认`);
-                    
-                    const confirmMessage = `⚠️ 任务处理已进行 ${maxIterations} 轮迭代，可能比较复杂。\n\n` +
+                operationCount++;
+                this.log('info', `执行操作 ${operationCount}/${maxOperations}`);
+                
+                // 检查是否达到操作限制
+                if (operationCount > maxOperations) {
+                    const confirmMessage = `⚠️ 已执行 ${maxOperations} 个操作，任务可能比较复杂。\n\n` +
                         `当前进度：\n` +
-                        `- 已完成 ${conversationHistory.length} 个阶段\n` +
-                        `- 工具调用: ${conversationHistory.filter(h => h.type === 'tool_calls').length} 次\n` +
-                        `- 执行操作: ${conversationHistory.filter(h => h.type === 'execute_operations').length} 次\n\n` +
-                        `是否继续处理？`;
+                        `- 读操作: ${operationHistory.filter(h => h.operation.type === 'read').length} 次\n` +
+                        `- 写操作: ${operationHistory.filter(h => h.operation.type === 'write').length} 次\n\n` +
+                        `是否继续执行？`;
                     
-                    const shouldContinue = await this.showIterationConfirmDialog(confirmMessage, iteration);
+                    const shouldContinue = await this.showIterationConfirmDialog(confirmMessage, operationCount);
                     
                     if (!shouldContinue) {
-                        this.log('info', '用户选择停止处理');
+                        this.log('info', '用户选择停止任务');
+                        this.resetTaskState();
                         return this.createResponse(
                             `⏹️ 任务已停止\n\n` +
-                            `处理摘要：\n` +
-                            `- 总迭代次数: ${iteration - 1}\n` +
-                            `- 工具调用: ${conversationHistory.filter(h => h.type === 'tool_calls').length} 次\n` +
-                            `- 执行操作: ${conversationHistory.filter(h => h.type === 'execute_operations').length} 次\n\n` +
+                            `执行摘要：\n` +
+                            `- 总操作次数: ${operationCount - 1}\n` +
+                            `- 读操作: ${operationHistory.filter(h => h.operation.type === 'read').length} 次\n` +
+                            `- 写操作: ${operationHistory.filter(h => h.operation.type === 'write').length} 次\n\n` +
                             `任务可能已部分完成，请检查结果。如需继续，请重新发送请求。`
                         );
                     }
                     
                     // 用户选择继续，重置计数器并增加限制
-                    this.log('info', '用户选择继续，重置迭代计数器');
-                    maxIterations += 10;
+                    maxOperations += 10;
                     
                     if (onStream) {
-                        onStream(`\n🔄 继续处理任务 (迭代 ${iteration})...\n`, '');
+                        onStream(`\n🔄 继续执行任务 (操作 ${operationCount})...\n`, '');
                     }
                 }
                 
-                // 构建包含累积上下文的消息
-                const contextualMessage = this.buildContextualMessage(message, accumulatedContext, conversationHistory);
+                // **重要修复：构建包含累积信息的上下文消息**
+                const contextualMessage = this.buildEnhancedContextualMessage(message, fullContext, operationHistory);
                 
-                // 让 AI 自由选择：工具调用（只读）或执行操作（写入）
-                this.log('info', '调用 AI 进行自由决策...');
+                // 调用 AI 获取下一个操作
+                this.log('info', '请求 AI 选择下一个操作...');
                 const response = await this.callOpenAI([
-                    { role: 'system', content: this.buildFlexibleSystemPrompt() },
+                    { role: 'system', content: this.buildSingleOperationSystemPrompt() },
                     { role: 'user', content: contextualMessage }
                 ], onStream);
                 
-                // 处理 AI 的响应
-                if (response && response.isToolCallResponse) {
-                    // AI 选择了工具调用（只读操作）
-                    this.log('info', 'AI 选择了工具调用模式');
-                    
-                    const toolCallResult = await this.handleToolCallsWithReadOnlyFilter(response, accumulatedContext);
-                    
-                    // 记录工具调用结果详情
-                    console.log(`📊 工具调用结果详情:`, {
-                        resultKeys: Object.keys(toolCallResult.results),
-                        resultSummary: toolCallResult.summary,
-                        accumulatedContextBefore: Object.keys(accumulatedContext),
-                        toolCallIteration: iteration
-                    });
-                    
-                    // 将工具调用结果添加到累积上下文
-                    accumulatedContext = this.mergeContext(accumulatedContext, {
-                        toolCallResults: toolCallResult.results,
-                        lastToolCallSummary: toolCallResult.summary
-                    });
-                    
-                    // 添加到对话历史
-                    conversationHistory.push({
-                        type: 'tool_calls',
-                        response: response,
-                        result: toolCallResult,
-                        timestamp: new Date().toISOString()
-                    });
-                    
-                    // 记录上下文累积后的状态
-                    console.log(`🔄 上下文累积后状态:`, {
-                        accumulatedContextAfter: Object.keys(accumulatedContext),
-                        contextSize: JSON.stringify(accumulatedContext).length,
-                        conversationHistoryLength: conversationHistory.length
-                    });
-                    
-                    this.log('info', `工具调用完成，获得 ${Object.keys(toolCallResult.results).length} 个结果`);
-                    
-                } else if (typeof response === 'string') {
-                    // AI 返回了文本响应，尝试解析是否包含执行指令
-                    const executionPlan = this.parseExecutionInstructions(response);
-                    
-                    if (executionPlan && executionPlan.operations && executionPlan.operations.length > 0) {
-                        // AI 选择了执行操作模式
-                        this.log('info', 'AI 选择了执行操作模式');
-                        console.log(`🚀 执行计划详情:`, {
-                            operations: executionPlan.operations,
-                            operationCount: executionPlan.operations.length,
-                            executionIteration: iteration
-                        });
-                        
-                        const executeResult = await this.executeOperationsFromPlan(executionPlan, accumulatedContext);
-                        
-                        // 将执行结果添加到累积上下文
-                        accumulatedContext = this.mergeContext(accumulatedContext, {
-                            executionResults: executeResult.results,
-                            lastExecutionSummary: executeResult.summary
-                        });
-                        
-                        // 添加到对话历史
-                        conversationHistory.push({
-                            type: 'execute_operations',
-                            plan: executionPlan,
-                            result: executeResult,
-                            timestamp: new Date().toISOString()
-                        });
-                        
-                        this.log('info', `执行操作完成: ${executeResult.completedSteps}/${executeResult.totalSteps} 步骤`);
-                        
-                    } else {
-                        // AI 认为任务已完成或给出了最终回答
-                        this.log('info', 'AI 给出最终回答');
-                        console.log(`✅ 任务完成总结:`, {
-                            finalResponse: response,
-                            totalIterations: iteration,
-                            toolCallRounds: conversationHistory.filter(h => h.type === 'tool_calls').length,
-                            executionRounds: conversationHistory.filter(h => h.type === 'execute_operations').length,
-                            finalContextKeys: Object.keys(accumulatedContext)
-                        });
-                        
-                        const finalMessage = `${response}\n\n` +
-                            `📊 处理摘要：\n` +
-                            `- 总迭代次数: ${iteration}\n` +
-                            `- 工具调用: ${conversationHistory.filter(h => h.type === 'tool_calls').length} 次\n` +
-                            `- 执行操作: ${conversationHistory.filter(h => h.type === 'execute_operations').length} 次`;
-                        
-                        return this.createResponse(finalMessage);
-                    }
-                } else {
-                    this.log('warn', '未知的响应格式', response);
-                    console.log(`❓ 未知响应格式:`, {
-                        responseType: typeof response,
-                        responseKeys: response && typeof response === 'object' ? Object.keys(response) : [],
-                        iteration: iteration
-                    });
-                    return this.createResponse('❌ 响应格式异常，请重试');
+                // 解析 AI 的响应
+                const operation = this.parseSingleOperation(response);
+                
+                if (!operation) {
+                    this.log('error', 'AI 响应格式无效');
+                    this.resetTaskState();
+                    return this.createResponse('❌ AI 响应格式无效，请重试');
                 }
+                
+                // 检查是否任务完成
+                if (operation.type === 'complete') {
+                    this.log('info', 'AI 决定完成任务');
+                    this.resetTaskState();
+                    
+                    // **新增：添加完成操作到历史**
+                    const completeHistoryItem = {
+                        operation,
+                        result: { success: true, type: 'complete', message: operation.message },
+                        timestamp: new Date().toISOString(),
+                        operationNumber: operationCount,
+                        type: 'complete'
+                    };
+                    operationHistory.push(completeHistoryItem);
+                    this.updateOperationHistoryUI(operationHistory);
+                    
+                    const finalMessage = `${operation.message || '任务已完成'}\n\n` +
+                        `📊 执行摘要：\n` +
+                        `- 总操作次数: ${operationCount}\n` +
+                        `- 读操作: ${operationHistory.filter(h => h.operation.type === 'read').length} 次\n` +
+                        `- 写操作: ${operationHistory.filter(h => h.operation.type === 'write').length} 次`;
+                    
+                    return this.createResponse(finalMessage);
+                }
+                
+                // **重要修复：检查重复操作**
+                const isDuplicateOperation = this.checkDuplicateOperation(operation, operationHistory);
+                if (isDuplicateOperation) {
+                    this.log('warn', `检测到重复操作: ${operation.type} - ${operation.action}`);
+                    
+                    // 强制完成任务以避免无限循环
+                    this.resetTaskState();
+                    return this.createResponse(
+                        `⚠️ 检测到重复操作，任务已停止\n\n` +
+                        `重复操作: ${operation.action}\n` +
+                        `已执行 ${operationCount} 个操作\n\n` +
+                        `可能原因：\n` +
+                        `- AI未正确理解已获取的信息\n` +
+                        `- 操作结果传递存在问题\n\n` +
+                        `建议重新发送请求或检查项目状态。`
+                    );
+                }
+                
+                // 执行单个操作
+                const operationResult = await this.executeSingleOperation(operation, fullContext);
+                
+                // 将操作结果添加到历史
+                const historyItem = {
+                    operation,
+                    result: operationResult,
+                    timestamp: new Date().toISOString(),
+                    operationNumber: operationCount,
+                    type: operation.type
+                };
+                operationHistory.push(historyItem);
+                
+                // **重要修复：更新fullContext以包含所有累积信息**
+                if (operation.type === 'read' && operationResult.success) {
+                    // 将读操作结果累积到fullContext中
+                    fullContext = this.updateContextWithOperationResult(fullContext, operation, operationResult, operationHistory);
+                    this.log('info', `上下文已更新，包含操作结果: ${operation.action}`);
+                }
+                
+                // **新增：实时更新操作历史UI**
+                this.updateOperationHistoryUI(operationHistory);
+                
+                this.log('info', `操作 ${operationCount} 完成: ${operation.action} - ${operationResult.success ? '成功' : '失败'}`);
             }
             
         } catch (error) {
             this.handleError(error, 'processMessage');
+            this.resetTaskState();
             return this.createResponse(`❌ 处理失败: ${error.message}`);
         }
     }
@@ -985,13 +984,20 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
             'open_file'
         ];
         
-        // 如果是写入工具，直接返回false
+        // 如果是写入工具，直接返回false并记录警告
         if (writeOnlyTools.includes(toolName)) {
-            this.log('warn', `工具 ${toolName} 是写入操作，不允许在工具调用模式下使用`);
+            this.log('error', `🚫 严重错误：工具 ${toolName} 是写入操作，绝对不允许在工具调用模式下使用！`);
+            console.error(`🚫 AI尝试在工具调用模式下使用写入工具: ${toolName}`);
             return false;
         }
         
-        return readOnlyTools.includes(toolName);
+        const isReadOnly = readOnlyTools.includes(toolName);
+        
+        if (!isReadOnly) {
+            this.log('warn', `⚠️ 未知工具 ${toolName}，默认不允许在工具调用模式下使用`);
+        }
+        
+        return isReadOnly;
     }
     
     /**
@@ -1128,10 +1134,8 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                     await window.ide.fileSystem.writeFile(target, content || '');
                     this.log('info', `文件创建成功: ${target}, 内容长度: ${(content || '').length}`);
                     
-                    // 更新文件浏览器
-                    if (window.ide.updateFileTree) {
-                        window.ide.updateFileTree();
-                    }
+                    // 强制刷新文件浏览器
+                    await this.forceRefreshFileTree();
                     break;
                     
                 case 'mkdir':
@@ -1139,10 +1143,8 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                     await this.ensureDirectoryExists(target, true);
                     this.log('info', `目录创建成功: ${target}`);
                     
-                    // 更新文件浏览器
-                    if (window.ide.updateFileTree) {
-                        window.ide.updateFileTree();
-                    }
+                    // 强制刷新文件浏览器
+                    await this.forceRefreshFileTree();
                     break;
                     
                 case 'edit':
@@ -1187,6 +1189,9 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                         const updatedContent = await window.ide.fileSystem.readFile(target);
                         window.ide.editor.setValue(updatedContent);
                     }
+                    
+                    // 强制刷新文件浏览器
+                    await this.forceRefreshFileTree();
                     break;
                     
                 case 'delete':
@@ -1199,10 +1204,8 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                         window.ide.closeFile(target);
                     }
                     
-                    // 更新文件浏览器
-                    if (window.ide.updateFileTree) {
-                        window.ide.updateFileTree();
-                    }
+                    // 强制刷新文件浏览器
+                    await this.forceRefreshFileTree();
                     break;
                     
                 case 'rmdir':
@@ -1210,10 +1213,8 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                     await window.ide.fileSystem.rmdir(target);
                     this.log('info', `目录删除成功: ${target}`);
                     
-                    // 更新文件浏览器
-                    if (window.ide.updateFileTree) {
-                        window.ide.updateFileTree();
-                    }
+                    // 强制刷新文件浏览器
+                    await this.forceRefreshFileTree();
                     break;
                     
                 case 'move':
@@ -1231,10 +1232,8 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                         }
                     }
                     
-                    // 更新文件浏览器
-                    if (window.ide.updateFileTree) {
-                        window.ide.updateFileTree();
-                    }
+                    // 强制刷新文件浏览器
+                    await this.forceRefreshFileTree();
                     break;
                     
                 case 'compile':
@@ -1260,6 +1259,46 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
         } catch (error) {
             this.log('error', `动作执行失败: ${action.type}`, error);
             throw error;
+        }
+    }
+    
+    /**
+     * 强制刷新文件树
+     */
+    async forceRefreshFileTree() {
+        try {
+            // 方法1：直接调用IDE的刷新方法
+            if (window.ide && window.ide.refreshFileExplorer) {
+                await window.ide.refreshFileExplorer();
+                this.log('info', '文件树刷新成功 (IDE方法)');
+            }
+            
+            // 方法2：触发文件系统更新事件
+            if (window.ide && window.ide.fileSystem && window.ide.fileSystem.notifyChange) {
+                window.ide.fileSystem.notifyChange();
+                this.log('info', '文件系统更新通知已发送');
+            }
+            
+            // 方法3：通过插件管理器刷新
+            if (window.pluginManager && window.pluginManager.triggerHook) {
+                await window.pluginManager.triggerHook('file-system.refresh');
+                this.log('info', '文件系统刷新钩子已触发');
+            }
+            
+            // 方法4：延迟刷新（确保文件操作完成）
+            setTimeout(async () => {
+                if (window.ide && window.ide.refreshFileExplorer) {
+                    try {
+                        await window.ide.refreshFileExplorer();
+                        this.log('info', '延迟文件树刷新完成');
+                    } catch (error) {
+                        this.log('warn', '延迟刷新失败', error);
+                    }
+                }
+            }, 500); // 500ms后刷新
+            
+        } catch (error) {
+            this.log('warn', '文件树刷新失败', error);
         }
     }
     
@@ -1639,27 +1678,26 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
     }
     
     /**
-     * 调用 OpenAI API（带超时和重试机制，支持流处理和工具调用）
+     * 调用 OpenAI API（简化版本，用于单操作模式）
      */
     async callOpenAI(messages, onStream = null) {
         let lastError = null;
-        let conversationMessages = [...messages]; // 复制消息数组
         
         for (let attempt = 0; attempt <= this.config.maxRetries; attempt++) {
             try {
                 this.log('info', `OpenAI API 调用尝试 ${attempt + 1}/${this.config.maxRetries + 1}`);
                 
                 const controller = new AbortController();
-                const timeoutMs = this.config.timeout * 1000; // 转换为毫秒
+                const timeoutMs = this.config.timeout * 1000;
                 const timeoutId = setTimeout(() => {
                     controller.abort();
                     this.log('warn', `API 请求超时 (${this.config.timeout}秒)`);
                 }, timeoutMs);
                 
-                // 准备请求体
+                // 准备请求体（简化版本，不使用工具调用）
                 const requestBody = {
                     model: this.config.model,
-                    messages: conversationMessages,
+                    messages: messages,
                     temperature: this.config.temperature
                 };
                 
@@ -1668,39 +1706,8 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                     requestBody.max_tokens = this.config.maxTokens;
                 }
                 
-                // 智能选择模式：检查是否需要工具调用
-                let useToolCalling = false;
-                let useStreaming = !!onStream && this.config.enableStreaming;
-                
-                if (this.toolCallManager) {
-                    const tools = this.toolCallManager.getToolDefinitions();
-                    if (tools.length > 0) {
-                        // 计算工具调用轮次，防止无限循环
-                        const toolCallRounds = conversationMessages.filter(msg => msg.role === 'assistant' && msg.tool_calls).length;
-                        const maxToolCallRounds = 15; // 最大允许15轮工具调用，支持两阶段系统的多轮迭代
-                        
-                        if (toolCallRounds < maxToolCallRounds) {
-                            // 检查最后一条用户消息或助手消息是否需要工具调用
-                            const lastMessage = conversationMessages[conversationMessages.length - 1];
-                            const needsTools = this.shouldUseTools(lastMessage?.content || '', conversationMessages);
-                            
-                            if (needsTools) {
-                                useToolCalling = true;
-                                useStreaming = false; // 工具调用时禁用流模式
-                                requestBody.tools = tools;
-                                requestBody.tool_choice = 'auto';
-                                this.log('info', `启用工具调用模式 (第${toolCallRounds + 1}轮)，可用工具: ${tools.length} 个`);
-                            } else {
-                                this.log('info', '当前消息不需要工具调用');
-                            }
-                        } else {
-                            this.log('warn', `已达到最大工具调用轮次 (${maxToolCallRounds})，禁用工具调用`);
-                        }
-                    }
-                }
-                
                 // 设置流模式
-                if (useStreaming) {
+                if (onStream && this.config.enableStreaming) {
                     requestBody.stream = true;
                     this.log('info', '启用流式响应模式');
                 }
@@ -1710,7 +1717,7 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                     headers: {
                         'Content-Type': 'application/json',
                         'Authorization': `Bearer ${this.config.apiKey}`,
-                        'User-Agent': 'LaTeX-Master-Agent/1.0.0'
+                        'User-Agent': 'LaTeX-Master-Agent/2.0.0'
                     },
                     body: JSON.stringify(requestBody),
                     signal: controller.signal
@@ -1738,7 +1745,7 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                     }
                 } else {
                     // 处理流式响应
-                    if (useStreaming && requestBody.stream) {
+                    if (onStream && requestBody.stream && this.config.enableStreaming) {
                         return await this.handleStreamResponse(response, onStream);
                     } else {
                         // 处理普通响应
@@ -1750,47 +1757,13 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                         
                         const choice = data.choices[0];
                         
-                        // 检查是否有工具调用
-                        if (choice.message && choice.message.tool_calls && choice.message.tool_calls.length > 0) {
-                            this.log('info', `收到 ${choice.message.tool_calls.length} 个工具调用请求`);
-                            const toolCallResult = await this.handleToolCalls(choice.message, conversationMessages, onStream);
-                            // handleToolCalls返回的是对象，我们需要返回这个对象以便在analyzeAndPlan中正确处理
-                            return toolCallResult;
-                        }
-                        
-                        // 普通消息响应
                         if (!choice.message || !choice.message.content) {
                             throw new Error('OpenAI API 返回格式异常');
                         }
                         
                         this.log('info', `API 调用成功，使用了 ${data.usage?.total_tokens || '未知'} tokens`);
                         
-                        // **新增：检查响应是否被误判为工具调用响应**
-                        // 如果响应内容包含工具调用但实际没有工具调用，直接返回内容
-                        const content = choice.message.content;
-                        if (content && typeof content === 'string') {
-                            // 检查是否包含```operations块，这表示是执行指令而不是工具调用
-                            if (content.includes('```operations')) {
-                                this.log('info', '检测到执行指令，返回普通文本响应');
-                                return content;
-                            }
-                            
-                            // 检查是否是最终回答（包含总结、建议等）
-                            const finalAnswerKeywords = [
-                                '下一步', '建议', '总结', '完成', '步骤', '结构',
-                                '章节', '内容', '撰写', '编写', '继续'
-                            ];
-                            const isFinalAnswer = finalAnswerKeywords.some(keyword => 
-                                content.toLowerCase().includes(keyword)
-                            );
-                            
-                            if (isFinalAnswer) {
-                                this.log('info', '检测到最终回答，返回普通文本响应');
-                                return content;
-                            }
-                        }
-                        
-                        return content;
+                        return choice.message.content;
                     }
                 }
                 
@@ -2242,7 +2215,7 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
             '选中', '光标', '位置',
             
             // 内容分析和扩展
-            '扩写', '扩展', '完善', '补充', '创建', '新建',
+            '扩写', '扩展', '完善', '补充', '创建', '新建', '改写', '重写',
             '分析', '修改', '优化', '去重', '重复',
             '章节', '内容', '文档',
             
@@ -2262,124 +2235,101 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
             return false;
         }
         
-        // **新增：检查上下文中是否已有足够信息**
-        // 如果消息包含用户上下文信息，检查是否已有相关文件内容
+        // **重要修复：检查是否为初始请求（没有上下文信息的情况）**
+        // 如果用户要求查看文件结构或修改文件，但当前没有文件内容，应该使用工具调用
+        const needsFileStructure = /文件结构|项目结构|目录结构|查看.*文件|所有文件/.test(lowerMessage);
+        const needsFileModification = /改写|重写|修改|扩写|创建.*章节|新建.*文件/.test(lowerMessage);
+        
+        // 检查当前上下文中是否已有足够的信息
+        let hasFileStructure = false;
+        let hasFileContents = false;
+        let hasProjectInfo = false;
+        
+        // 检查对话历史中是否已经获取了相关信息
         if (conversationMessages && conversationMessages.length > 0) {
-            // 查找最近的用户消息，检查是否包含上下文信息
             const userMessages = conversationMessages.filter(msg => msg.role === 'user');
             const lastUserMessage = userMessages[userMessages.length - 1];
             
             if (lastUserMessage && lastUserMessage.content) {
                 const content = lastUserMessage.content;
                 
-                // 检查是否已有具体获取的信息部分
-                if (content.includes('具体获取的信息：') || content.includes('📄 **read_file**:')) {
-                    // 检查是否已经有文件内容
-                    const hasFileContent = /📄 \*\*read_file\*\*:[\s\S]*?文件内容:/m.test(content);
-                    if (hasFileContent) {
-                        this.log('info', `工具调用判断: "${message.substring(0, 50)}..." -> false (已有文件内容)`);
-                        return false;
-                    }
-                }
+                // 检查是否已有文件结构信息
+                hasFileStructure = content.includes('📄 **get_file_structure**:') || 
+                                 content.includes('📄 **list_files**:') ||
+                                 content.includes('项目结构:') ||
+                                 content.includes('找到') && content.includes('个文件/目录:');
                 
-                // 检查是否已有文件列表
-                if (content.includes('📄 **list_files**:') || content.includes('找到') && content.includes('个文件/目录:')) {
-                    // 如果用户只是要求分析现有内容而不是获取新文件，不需要工具调用
-                    const analysisKeywords = ['分析', '扩写', '完善', '创建', '新建', '修改'];
-                    const needsAnalysis = analysisKeywords.some(keyword => lowerMessage.includes(keyword));
-                    if (needsAnalysis) {
-                        this.log('info', `工具调用判断: "${message.substring(0, 50)}..." -> false (已有文件列表，需要分析)`);
-                        return false;
-                    }
-                }
+                // 检查是否已有文件内容
+                hasFileContents = content.includes('📄 **read_file**:') && content.includes('文件内容:');
                 
-                // 检查是否已有项目结构信息
-                if (content.includes('📄 **get_file_structure**:') || content.includes('项目结构:')) {
-                    this.log('info', `工具调用判断: "${message.substring(0, 50)}..." -> false (已有项目结构)`);
-                    return false;
-                }
+                // 检查是否已有项目信息
+                hasProjectInfo = content.includes('📄 **get_project_info**:');
+            }
+            
+            // 检查工具调用结果
+            const toolResults = conversationMessages.filter(msg => msg.role === 'tool');
+            
+            if (toolResults.length > 0) {
+                toolResults.forEach(tr => {
+                    try {
+                        const result = JSON.parse(tr.content);
+                        if (result.success) {
+                            if (result.structure || result.files) hasFileStructure = true;
+                            if (result.content && result.file_path) hasFileContents = true;
+                            if (result.total_files !== undefined) hasProjectInfo = true;
+                        }
+                    } catch (e) {
+                        // 忽略解析错误
+                    }
+                });
             }
         }
         
-        // 特殊情况：如果用户明确要求查看、分析或扩写项目内容，但没有具体信息，才使用工具调用
-        const projectAnalysisKeywords = [
-            '查看.*项目', '分析.*项目', '整个项目', '所有.*章节', '扩写.*章节',
-            '新建.*章节', '完善.*文档', '优化.*结构'
-        ];
+        // **核心逻辑：根据用户需求和当前信息状态决定是否需要工具调用**
         
-        const needsProjectAnalysis = projectAnalysisKeywords.some(pattern => {
-            const regex = new RegExp(pattern, 'i');
-            return regex.test(message);
-        });
-        
-        if (needsProjectAnalysis) {
-            // 但是要检查是否已经有相关信息了
-            if (conversationMessages && conversationMessages.length > 0) {
-                const toolResults = conversationMessages.filter(msg => msg.role === 'tool');
-                if (toolResults.length > 2) { // 如果已经有多次工具调用，可能已经有足够信息
-                    this.log('info', `工具调用判断: "${message.substring(0, 50)}..." -> false (已有${toolResults.length}次工具调用结果)`);
-                    return false;
-                }
-            }
-            
-            this.log('info', `工具调用判断: "${message.substring(0, 50)}..." -> true (需要项目分析，但信息不足)`);
+        // 1. 如果用户要求查看文件结构，但没有结构信息
+        if (needsFileStructure && !hasFileStructure) {
+            this.log('info', `工具调用判断: "${message.substring(0, 50)}..." -> true (需要文件结构信息)`);
             return true;
         }
         
-        // 检查是否已经有足够的上下文信息
+        // 2. 如果用户要求修改文件但没有具体的文件内容
+        if (needsFileModification && !hasFileContents) {
+            this.log('info', `工具调用判断: "${message.substring(0, 50)}..." -> true (需要文件内容用于修改)`);
+            return true;
+        }
+        
+        // 3. 如果用户提到具体操作但上下文明显不足
+        if ((needsFileStructure || needsFileModification) && (!hasFileStructure && !hasFileContents)) {
+            this.log('info', `工具调用判断: "${message.substring(0, 50)}..." -> true (上下文信息不足)`);
+            return true;
+        }
+        
+        // 4. 特殊情况：用户首次请求且需要项目信息
+        const isFirstRequest = !conversationMessages || conversationMessages.length <= 2;
+        if (isFirstRequest && (needsFileStructure || needsFileModification)) {
+            this.log('info', `工具调用判断: "${message.substring(0, 50)}..." -> true (首次请求需要项目信息)`);
+            return true;
+        }
+        
+        // 5. 如果已经有足够信息，不需要工具调用
+        if (hasFileStructure && (needsFileModification ? hasFileContents : true)) {
+            this.log('info', `工具调用判断: "${message.substring(0, 50)}..." -> false (已有足够信息)`);
+            return false;
+        }
+        
+        // 6. 检查是否已经有多次工具调用但仍无有效结果
         if (conversationMessages && conversationMessages.length > 0) {
             const toolResults = conversationMessages.filter(msg => msg.role === 'tool');
-            
-            // 如果已经有工具调用结果，检查是否需要更多信息
-            if (toolResults.length > 0) {
-                // 分析最近的工具调用结果
-                const recentToolResult = toolResults[toolResults.length - 1];
-                try {
-                    const result = JSON.parse(recentToolResult.content);
-         
-                    // 如果最近的工具调用失败，可能需要尝试其他工具
-                    if (!result.success) {
-                        this.log('info', `工具调用判断: "${message.substring(0, 50)}..." -> true (上次工具调用失败)`);
-                        return true;
-                    }
-                    
-                    // 检查是否需要基于已有结果进行进一步的工具调用
-                    // 例如：获取了文件列表后，可能需要读取具体文件
-                    if (result.files && Array.isArray(result.files) && result.files.length > 0) {
-                        // 如果有文件列表但消息中提到具体文件操作，可能需要读取文件
-                        const needsFileContent = /读取|查看|内容|分析|修改|编辑|扩写/.test(lowerMessage);
-                        if (needsFileContent) {
-                            // 但是要检查是否已经读取过文件了
-                            const hasReadResults = toolResults.some(tr => {
-                                try {
-                                    const trResult = JSON.parse(tr.content);
-                                    return trResult.content && trResult.file_path; // 有文件内容说明已经读取过
-                                } catch (e) {
-                                    return false;
-                                }
-                            });
-                            
-                            if (hasReadResults) {
-                                this.log('info', `工具调用判断: "${message.substring(0, 50)}..." -> false (已读取过文件内容)`);
-                                return false;
-                            } else {
-                                this.log('info', `工具调用判断: "${message.substring(0, 50)}..." -> true (需要读取文件内容)`);
-                                return true;
-                            }
-                        }
-                    }
-                    
-                } catch (error) {
-                    // 解析失败，可能需要重新调用工具
-                    this.log('info', `工具调用判断: "${message.substring(0, 50)}..." -> true (工具结果解析失败)`);
-                    return true;
-                }
+            if (toolResults.length > 3) { // 如果已经有多次工具调用
+                this.log('info', `工具调用判断: "${message.substring(0, 50)}..." -> false (已有${toolResults.length}次工具调用结果)`);
+                return false;
             }
         }
         
-        // 默认情况下，如果有工具关键词但检查发现可能不需要，返回false
-        this.log('info', `工具调用判断: "${message.substring(0, 50)}..." -> false (有关键词但可能已有足够信息)`);
-        return false;
+        // 7. 默认情况：如果有工具关键词且信息不足，使用工具调用
+        this.log('info', `工具调用判断: "${message.substring(0, 50)}..." -> true (有关键词且需要更多信息)`);
+        return true;
     }
     
     /**
@@ -2719,10 +2669,11 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
 
 **🔧 工作模式：**
 
-你可以自由选择以下两种工作方式：
+你有两种严格分离的工作模式，绝对不能混合使用：
 
-**1. 工具调用模式（信息获取）**
-当你需要获取更多信息时，可以使用以下只读工具：
+**1. 工具调用模式（信息获取阶段）**
+**用途：** 只能用于获取信息和分析现状
+**可用工具：**
 - \`read_file\`: 读取文件内容
 - \`list_files\`: 列出目录文件
 - \`get_file_structure\`: 获取项目结构
@@ -2730,13 +2681,14 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
 - \`get_project_info\`: 获取项目信息
 - \`get_editor_state\`: 获取编辑器状态
 
-**⚠️ 工具调用限制：**
-- 工具调用模式下 **绝对禁止** 使用任何写入工具
-- 禁止的工具包括：write_file, create_file, delete_file, create_directory, compile_latex 等
-- 只能使用上述明确列出的只读工具
+**⚠️ 严格禁止：**
+- 绝对不能使用任何文件修改工具（write_file, create_file, delete_file等）
+- 不能进行任何写入操作
+- 只能读取和分析
 
-**2. 执行操作模式（文件操作）**
-当你有足够信息需要执行具体操作时，在你的回答中包含操作指令：
+**2. 执行操作模式（文件操作阶段）**
+**用途：** 执行具体的文件操作和修改
+**使用方式：** 在回答中包含 \`\`\`operations 指令块
 
 \`\`\`operations
 [
@@ -2758,75 +2710,77 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
 ]
 \`\`\`
 
-**可用的操作类型：**
-- \`create\`: 创建新文件（如果文件不存在会自动创建目录）
-- \`edit\`: 编辑现有文件（支持replace/insert/delete）
-- \`delete\`: 删除文件
-- \`move\`: 移动/重命名文件
-- \`mkdir\`: 创建目录
-- \`rmdir\`: 删除目录
-- \`compile\`: 编译LaTeX文档
+**⚠️ JSON格式重要说明：**
+LaTeX代码在JSON中必须使用正确的转义：
+- LaTeX命令：\`\\\\\\\\chapter{}\` （四个反斜杠）
+- 换行符：\`\\\\\\\\n\` （四个反斜杠加n）
+- 数学符号：\`\\\\\\\\$\`
 
-**决策原则：**
-1. **检查已获取的信息**：仔细检查上下文中的"具体获取的信息"部分，如果已经有足够信息，不要重复获取
-2. 如果需要查看/分析现有文件但没有足够信息 → 使用工具调用（只读）
-3. 如果需要搜索特定内容但不知道在哪个文件 → 使用工具调用（只读）
-4. **如果已经获取了足够信息可以执行具体操作** → 在回答中包含操作指令
-5. 如果只是回答问题或提供建议 → 直接回答
-6. **如果任务已完成或无需进一步操作** → 直接回答并总结完成情况
-
-**关键判断标准：**
-- 如果上下文中已经显示了相关文件的内容，不要重复读取
-- 如果上下文中已经显示了文件列表，不要重复获取
-- 如果上下文中已经显示了搜索结果，不要重复搜索
-- **基于已获取的具体信息进行决策，而不是一直获取更多信息**
-
-**执行操作的时机（重要）：**
-- **当你已经看到文件内容并且用户要求修改/扩写时** → 立即执行操作，不要再获取更多信息
-- **当你已经了解项目结构并且用户要求创建新文件时** → 立即执行操作
-- **当你有足够信息来完成用户请求时** → 立即执行操作，不要犹豫
-- **避免"分析后再决定"的模式** → 直接基于已有信息执行操作
-
-**操作指令示例：**
-当需要创建或修改文件时，使用以下格式：
+**正确示例：**
 \`\`\`operations
 [
   {
     "type": "create",
-    "description": "创建新的章节文件",
+    "description": "创建量子力学章节",
     "target": "/chapters/chapter1.tex",
-    "content": "\\chapter{量子力学的基础}\\n\\n这是第一章的内容..."
-  },
-  {
-    "type": "edit", 
-    "description": "扩写现有章节",
-    "target": "/chapters/chapter2.tex",
-    "editType": "replace",
-    "startLine": 1,
-    "endLine": -1,
-    "content": "完整的新文件内容..."
+    "content": "\\\\\\\\chapter{量子力学基础}\\\\\\\\n\\\\\\\\n这是第一章的内容。\\\\\\\\n\\\\\\\\n\\\\\\\\section{基本概念}\\\\\\\\n\\\\\\\\n量子力学是描述微观粒子运动的理论。"
   }
 ]
 \`\`\`
 
-**完成条件（重要）：**
-- 当你已经完成了用户请求的所有操作时，直接回答总结结果，不要继续调用工具或执行操作
-- 当你已经提供了用户需要的信息或建议时，直接回答，不要继续获取更多信息
-- 当用户的问题是简单的询问时，直接回答，不需要文件操作
-- **当你看到上下文中已经有足够的信息来回答用户问题时，直接基于这些信息回答**
-- **当你看到上下文中已经有文件内容时，如果用户要求扩写/修改，立即执行操作**
-- 避免重复执行相同的操作或获取相同的信息
+**错误示例（不要这样做）：**
+\`\`\`operations
+[
+  {
+    "content": "\\chapter{量子力学}"  // ❌ 错误：反斜杠不够
+  }
+]
+\`\`\`
 
-**重要：**
-- 工具调用只能用于读取信息，**绝对不能修改文件**
-- 操作指令只能用于修改文件，不能读取信息
-- 你可以在多轮对话中灵活切换这两种模式
-- 每次的结果都会作为上下文提供给你，帮助你做出更好的决策
-- **一旦任务完成，立即停止并总结结果，不要继续循环**
+**🎯 决策规则（严格遵循）：**
 
-**严格禁止：**
-- 在工具调用模式下使用任何写入工具（如 write_file）
-- 混合使用工具调用和操作指令`;
+**使用工具调用的情况：**
+1. 用户要求查看/分析文件，但你没有文件内容
+2. 用户要求了解项目结构，但你不知道有什么文件
+3. 用户提到具体文件，但你需要先读取内容
+4. 需要搜索特定内容但不知道位置
+
+**使用执行操作的情况：**
+1. 你已经有足够信息来创建/修改文件
+2. 用户明确要求创建新文件
+3. 用户要求修改现有文件且你已知道文件内容
+4. 你有足够的项目结构信息来执行操作
+
+**🚫 绝对禁止：**
+1. 在工具调用中使用write_file、create_file等写入工具
+2. 在operations块中使用read_file、list_files等读取工具
+3. 在同一个响应中混合使用两种模式
+4. 在JSON中使用未正确转义的LaTeX代码
+
+**📋 工作流程示例：**
+
+**场景1：用户说"帮我创建一个LaTeX文档"**
+- 如果不知道项目结构 → 先用 get_file_structure 工具调用
+- 然后用 operations 块创建文件
+
+**场景2：用户说"修改main.tex文件"**
+- 如果没有文件内容 → 先用 read_file 工具调用获取内容
+- 然后用 operations 块修改文件
+
+**场景3：用户说"查看项目结构"**
+- 直接用工具调用获取信息，然后回答
+
+**💡 关键提示：**
+- 信息获取和文件操作严格分离
+- 先获取信息，再执行操作
+- 每次只做一个阶段的事情
+- 确保LaTeX代码正确转义
+
+**✅ 成功标准：**
+- 信息充足时立即执行操作
+- 不重复获取已有的信息
+- 不在错误的模式下使用工具
+- JSON格式正确无错误`;
     }
 
     /**
@@ -2838,9 +2792,28 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
         // 添加当前可用的上下文信息
         message += `**当前上下文信息：**\n`;
         
+        // 检查是否有足够的项目信息
+        let hasFileStructure = false;
+        let hasFileContents = false;
+        let hasProjectInfo = false;
+        
         // 项目信息
         if (accumulatedContext.project) {
             message += `- 项目：${accumulatedContext.project.name || '未命名'} (${accumulatedContext.project.files || 0} 个文件)\n`;
+            hasProjectInfo = true;
+        } else {
+            message += `- 项目信息：❌ 未获取\n`;
+        }
+        
+        // 文件结构信息
+        if (accumulatedContext.fileStructure) {
+            const preview = accumulatedContext.fileStructure.length > 300 
+                ? accumulatedContext.fileStructure.substring(0, 300) + '...(截断)'
+                : accumulatedContext.fileStructure;
+            message += `- 文件结构：✅ 已获取\n  ${preview.replace(/\n/g, '\n  ')}\n`;
+            hasFileStructure = true;
+        } else {
+            message += `- 文件结构：❌ 未获取\n`;
         }
         
         // 当前编辑器状态
@@ -2849,7 +2822,10 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
             if (accumulatedContext.editor.content) {
                 const preview = accumulatedContext.editor.content.substring(0, 200);
                 message += `- 文件内容预览：${preview}${accumulatedContext.editor.content.length > 200 ? '...' : ''}\n`;
+                hasFileContents = true;
             }
+        } else {
+            message += `- 当前编辑文件：❌ 无文件打开\n`;
         }
         
         // 用户提供的上下文
@@ -2865,6 +2841,10 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                 message += `  最近获取：${accumulatedContext.lastToolCallSummary}\n`;
             }
             
+            // 检查具体的工具调用结果
+            let hasStructureFromTools = false;
+            let hasContentFromTools = false;
+            
             // 添加具体的工具调用结果内容
             message += `\n**具体获取的信息：**\n`;
             Object.keys(accumulatedContext.toolCallResults).forEach(toolName => {
@@ -2879,6 +2859,7 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                             : result.content;
                         message += `- 文件路径: ${filePath}\n`;
                         message += `- 文件内容:\n\`\`\`\n${contentPreview}\n\`\`\`\n`;
+                        hasContentFromTools = true;
                     } else if (toolName === 'list_files' && result.files) {
                         message += `- 找到 ${result.files.length} 个文件/目录:\n`;
                         result.files.slice(0, 20).forEach(file => {
@@ -2887,6 +2868,7 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                         if (result.files.length > 20) {
                             message += `  ... 还有 ${result.files.length - 20} 个文件/目录\n`;
                         }
+                        hasStructureFromTools = true;
                     } else if (toolName === 'search_in_files' && result.results) {
                         message += `- 搜索结果: 找到 ${result.results.length} 个匹配项\n`;
                         result.results.slice(0, 10).forEach(match => {
@@ -2900,6 +2882,7 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                             ? (result.structure.length > 500 ? result.structure.substring(0, 500) + '\n... (结构过长，已截断)' : result.structure)
                             : JSON.stringify(result.structure, null, 2);
                         message += `- 项目结构:\n\`\`\`\n${structurePreview}\n\`\`\`\n`;
+                        hasStructureFromTools = true;
                     } else if (toolName === 'get_project_info') {
                         message += `- 项目信息: ${result.total_files || 0} 个文件, ${result.total_directories || 0} 个目录\n`;
                         if (result.files_by_type) {
@@ -2921,6 +2904,10 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                     message += `\n❌ **${toolName}**: 失败 - ${result.error || '未知错误'}\n`;
                 }
             });
+            
+            // 更新检查结果
+            hasFileStructure = hasFileStructure || hasStructureFromTools;
+            hasFileContents = hasFileContents || hasContentFromTools;
         }
         
         // 执行结果
@@ -2951,9 +2938,42 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
         
         message += '\n';
         
+        // **新增：信息缺失检查和建议**
+        message += `**📋 信息状态检查：**\n`;
+        
+        // 分析用户需求
+        const lowerMessage = originalMessage.toLowerCase();
+        const needsFileStructure = /文件结构|项目结构|目录结构|查看.*文件|所有文件|改写|重写/.test(lowerMessage);
+        const needsFileContents = /改写|重写|修改|扩写|创建.*章节|新建.*文件|分析.*内容/.test(lowerMessage);
+        
+        if (needsFileStructure && !hasFileStructure) {
+            message += `❌ **缺少文件结构信息** - 需要获取项目文件结构\n`;
+        } else if (hasFileStructure) {
+            message += `✅ **文件结构信息** - 已获取\n`;
+        }
+        
+        if (needsFileContents && !hasFileContents) {
+            message += `❌ **缺少文件内容** - 需要读取具体文件内容\n`;
+        } else if (hasFileContents) {
+            message += `✅ **文件内容** - 已获取\n`;
+        }
+        
+        // 根据缺失信息给出建议
+        if ((needsFileStructure && !hasFileStructure) || (needsFileContents && !hasFileContents)) {
+            message += `\n💡 **建议操作：**\n`;
+            if (needsFileStructure && !hasFileStructure) {
+                message += `- 使用 get_file_structure 或 list_files 获取项目结构\n`;
+            }
+            if (needsFileContents && !hasFileContents) {
+                message += `- 使用 read_file 读取主要文件内容（如 main.tex）\n`;
+            }
+        } else if (hasFileStructure && (!needsFileContents || hasFileContents)) {
+            message += `\n🚀 **可以开始执行操作：** 信息充足，可以进行文件修改\n`;
+        }
+        
         // 添加详细的执行历史
         if (conversationHistory && conversationHistory.length > 0) {
-            message += `**详细执行历史：**\n`;
+            message += `\n**详细执行历史：**\n`;
             
             // 统计已执行的操作
             const executedOperations = new Set();
@@ -3073,6 +3093,7 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
         
         const results = {};
         let successCount = 0;
+        let rejectedCount = 0;
         let summary = '';
         
         // 显示工具调用面板
@@ -3087,13 +3108,21 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
             
             // 检查是否为只读工具
             if (!this.isReadOnlyTool(toolName)) {
-                this.log('warn', `跳过非只读工具: ${toolName}`);
+                this.log('error', `🚫 拒绝执行写入工具: ${toolName} - 工具调用模式只允许只读操作`);
+                
+                const rejectionResult = {
+                    success: false,
+                    error: `工具调用模式禁止使用写入工具 ${toolName}`,
+                    tool_name: toolName,
+                    rejected: true,
+                    suggestion: `请在执行操作模式中使用 ${toolName} 或使用 operations 指令块`
+                };
+                
+                results[toolName] = rejectionResult;
+                rejectedCount++;
                 
                 if (toolCallId && window.agentPanel) {
-                    window.agentPanel.updateToolCallStep(toolCallId, i, 'error', {
-                        success: false,
-                        error: '工具调用模式下只允许只读操作'
-                    });
+                    window.agentPanel.updateToolCallStep(toolCallId, i, 'error', rejectionResult);
                 }
                 continue;
             }
@@ -3130,13 +3159,20 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
             window.agentPanel.completeToolCall(toolCallId);
         }
         
-        summary = `${successCount}/${toolCalls.length} 个工具调用成功`;
+        // 构建详细的摘要信息
+        if (rejectedCount > 0) {
+            summary = `${successCount}/${toolCalls.length} 个工具调用成功，${rejectedCount} 个被拒绝（写入工具）`;
+            this.log('warn', `有 ${rejectedCount} 个写入工具被拒绝执行，请使用执行操作模式`);
+        } else {
+            summary = `${successCount}/${toolCalls.length} 个工具调用成功`;
+        }
         
         return {
             results,
             summary,
             successCount,
-            totalCount: toolCalls.length
+            totalCount: toolCalls.length,
+            rejectedCount
         };
     }
 
@@ -3151,8 +3187,32 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                 return null;
             }
             
-            const operationsJson = operationsMatch[1].trim();
-            const operations = JSON.parse(operationsJson);
+            let operationsJson = operationsMatch[1].trim();
+            
+            // 预处理JSON，修复常见的转义问题
+            operationsJson = this.preprocessOperationsJson(operationsJson);
+            
+            let operations;
+            try {
+                operations = JSON.parse(operationsJson);
+            } catch (parseError) {
+                this.log('error', `JSON解析失败，原始内容: ${operationsJson.substring(0, 500)}...`);
+                this.log('error', `解析错误详情: ${parseError.message}`);
+                
+                // 尝试修复常见的JSON错误
+                const fixedJson = this.attemptJsonFix(operationsJson);
+                if (fixedJson) {
+                    try {
+                        operations = JSON.parse(fixedJson);
+                        this.log('info', 'JSON修复成功');
+                    } catch (secondError) {
+                        this.log('error', 'JSON修复后仍然解析失败', secondError);
+                        return null;
+                    }
+                } else {
+                    return null;
+                }
+            }
             
             if (!Array.isArray(operations)) {
                 this.log('warn', '操作指令必须是数组格式');
@@ -3174,6 +3234,123 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
             
         } catch (error) {
             this.log('error', '解析执行指令失败', error);
+            return null;
+        }
+    }
+    
+    /**
+     * 预处理Operations JSON，修复常见的转义问题
+     */
+    preprocessOperationsJson(jsonStr) {
+        // 修复LaTeX命令中的反斜杠转义问题
+        let processed = jsonStr;
+        
+        try {
+            // 1. 首先处理明显的LaTeX命令模式
+            // 将 \\documentclass 这样的模式转换为正确的JSON转义格式
+            processed = processed.replace(/\\\\documentclass/g, '\\\\\\\\documentclass');
+            processed = processed.replace(/\\\\begin/g, '\\\\\\\\begin');
+            processed = processed.replace(/\\\\end/g, '\\\\\\\\end');
+            processed = processed.replace(/\\\\include/g, '\\\\\\\\include');
+            processed = processed.replace(/\\\\chapter/g, '\\\\\\\\chapter');
+            processed = processed.replace(/\\\\section/g, '\\\\\\\\section');
+            processed = processed.replace(/\\\\subsection/g, '\\\\\\\\subsection');
+            
+            // 2. 处理换行符
+            processed = processed.replace(/\\\\n/g, '\\\\\\\\n');
+            
+            // 3. 更智能的content字段处理
+            processed = processed.replace(/"content"\s*:\s*"([^"]*(?:\\.[^"]*)*)"/g, (match, content) => {
+                // 对content内容进行深度清理
+                let fixedContent = content;
+                
+                // 修复所有LaTeX命令（使用更通用的模式）
+                // 匹配 \word{ 模式并确保正确转义
+                fixedContent = fixedContent.replace(/\\([a-zA-Z]+)\{/g, '\\\\\\\\$1{');
+                
+                // 修复单独的反斜杠（但不是已经转义的）
+                fixedContent = fixedContent.replace(/(?<!\\)\\(?![\\"])/g, '\\\\\\\\');
+                
+                // 修复换行符
+                fixedContent = fixedContent.replace(/\\n/g, '\\\\\\\\n');
+                
+                // 修复数学模式
+                fixedContent = fixedContent.replace(/\\\$/g, '\\\\\\\\$');
+                
+                // 修复特殊字符
+                fixedContent = fixedContent.replace(/\\&/g, '\\\\\\\\&');
+                fixedContent = fixedContent.replace(/\\%/g, '\\\\\\\\%');
+                fixedContent = fixedContent.replace(/\\#/g, '\\\\\\\\#');
+                
+                return `"content": "${fixedContent}"`;
+            });
+            
+            // 4. 处理description字段
+            processed = processed.replace(/"description"\s*:\s*"([^"]*(?:\\.[^"]*)*)"/g, (match, desc) => {
+                let fixedDesc = desc.replace(/\\/g, '\\\\\\\\');
+                return `"description": "${fixedDesc}"`;
+            });
+            
+            // 5. 最后的清理 - 移除多余的转义
+            // 如果有四个以上连续的反斜杠，可能过度转义了
+            processed = processed.replace(/\\{6,}/g, '\\\\\\\\');
+            
+            this.log('info', `JSON预处理完成，原长度: ${jsonStr.length}, 处理后长度: ${processed.length}`);
+            
+            return processed;
+            
+        } catch (error) {
+            this.log('error', 'JSON预处理失败', error);
+            return jsonStr; // 返回原始字符串
+        }
+    }
+    
+    /**
+     * 尝试修复JSON格式错误
+     */
+    attemptJsonFix(jsonStr) {
+        let fixed = jsonStr;
+        
+        try {
+            // 1. 修复未转义的反斜杠
+            fixed = fixed.replace(/\\(?!["\\/bfnrtuz])/g, '\\\\');
+            
+            // 2. 修复字符串中的未转义引号
+            fixed = fixed.replace(/"([^"]*)"([^,}\]]*)"([^"]*)"([^,}\]]*)/g, (match, ...args) => {
+                // 简单的引号转义处理
+                return match.replace(/"/g, '\\"').replace(/\\"/g, '"').replace(/^"|"$/g, '"');
+            });
+            
+            // 3. 修复可能的多余逗号
+            fixed = fixed.replace(/,(\s*[}\]])/g, '$1');
+            
+            // 4. 验证是否为有效JSON
+            JSON.parse(fixed);
+            return fixed;
+            
+        } catch (error) {
+            this.log('warn', `JSON修复尝试失败: ${error.message}`);
+            
+            // 最后的尝试：手动构造基本结构
+            try {
+                const basicPattern = /\{\s*"type"\s*:\s*"([^"]+)"\s*,\s*"target"\s*:\s*"([^"]+)"/g;
+                const matches = [...jsonStr.matchAll(basicPattern)];
+                
+                if (matches.length > 0) {
+                    const basicOps = matches.map(match => ({
+                        type: match[1],
+                        target: match[2],
+                        description: `${match[1]} operation on ${match[2]}`,
+                        content: ""
+                    }));
+                    
+                    this.log('info', `构造基本操作结构: ${basicOps.length} 个操作`);
+                    return JSON.stringify(basicOps);
+                }
+            } catch (basicError) {
+                this.log('warn', '基本结构构造也失败了');
+            }
+            
             return null;
         }
     }
@@ -3275,6 +3452,900 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
             completedSteps,
             totalSteps: operations.length
         };
+    }
+
+    /**
+     * 构建单操作模式的系统提示词
+     */
+    buildSingleOperationSystemPrompt() {
+        return `你是 LaTeX Master，一个智能的 LaTeX 文档助手。
+
+**🚨 格式要求（必须严格遵守）：**
+
+你必须返回以下三种JSON格式之一，不能有任何其他格式：
+
+**1. 读操作（获取信息）：**
+\`\`\`json
+{
+  "type": "read",
+  "action": "具体操作名",
+  "parameters": { "参数": "值" },
+  "reasoning": "为什么执行这个操作"
+}
+\`\`\`
+
+**2. 写操作（修改文件）：**
+\`\`\`json
+{
+  "type": "write",
+  "action": "具体操作名", 
+  "parameters": { "参数": "值" },
+  "reasoning": "为什么执行这个操作"
+}
+\`\`\`
+
+**3. 任务完成：**
+\`\`\`json
+{
+  "type": "complete",
+  "message": "任务完成的详细说明",
+  "reasoning": "为什么认为任务已完成"
+}
+\`\`\`
+
+**⚠️ 格式错误示例（绝对不要这样做）：**
+❌ \`{"type": "get_project_info"}\` （错误：action作为type）
+❌ \`{"action": "read_file"}\` （错误：缺少type）
+❌ \`{"tool": "read_file"}\` （错误：字段名错误）
+
+**✅ 正确格式示例：**
+✅ \`{"type": "read", "action": "get_project_info", "parameters": {}}\`
+✅ \`{"type": "write", "action": "create_file", "parameters": {"file_path": "/test.tex", "content": "内容"}}\`
+
+**🎯 工作模式：单操作模式**
+
+你每次只能执行一个操作，然后等待结果。所有操作都会返回完整结果供你分析。
+
+**📋 可用操作清单：**
+
+**🟢 读操作（type: "read"）：**
+- \`read_file\`: 读取文件内容
+  - 参数：\`{"file_path": "/path/to/file"}\`
+- \`list_files\`: 列出目录文件
+  - 参数：\`{"directory_path": "/path/to/dir"}\`
+- \`get_file_structure\`: 获取项目结构
+  - 参数：\`{}\` （无参数）
+- \`search_in_files\`: 搜索文件内容
+  - 参数：\`{"query": "搜索内容", "file_pattern": "*.tex"}\`
+- \`get_project_info\`: 获取项目信息
+  - 参数：\`{}\` （无参数）
+- \`get_current_file\`: 获取当前打开的文件
+  - 参数：\`{}\` （无参数）
+
+**🟣 写操作（type: "write"）：**
+- \`create_file\`: 创建新文件
+  - 参数：\`{"file_path": "/path/to/file", "content": "文件内容"}\`
+- \`edit_file\`: 编辑现有文件
+  - 参数：\`{"file_path": "/path/to/file", "content": "新内容", "edit_type": "replace"}\`
+- \`delete_file\`: 删除文件
+  - 参数：\`{"file_path": "/path/to/file"}\`
+- \`create_directory\`: 创建目录
+  - 参数：\`{"directory_path": "/path/to/dir"}\`
+- \`delete_directory\`: 删除目录
+  - 参数：\`{"directory_path": "/path/to/dir"}\`
+- \`move_file\`: 移动/重命名文件
+  - 参数：\`{"source_path": "/old/path", "target_path": "/new/path"}\`
+
+**⚠️ LaTeX 代码转义规则：**
+在JSON字符串中，LaTeX命令需要四个反斜杠：
+- 正确：\`"\\\\\\\\chapter{标题}"\`
+- 错误：\`"\\chapter{标题}"\`
+
+**🎯 操作策略：**
+
+1. **信息收集优先**：如果不确定项目结构，先用读操作获取信息
+2. **逐步执行**：每次只做一个明确的操作
+3. **智能判断**：根据已有信息决定下一步操作
+4. **完整结果**：所有操作都会返回完整结果供分析
+5. **明确完成**：当所有任务完成时，使用 \`complete\` 类型
+
+**📚 完整操作示例：**
+
+**示例1：获取项目信息**
+\`\`\`json
+{
+  "type": "read",
+  "action": "get_project_info",
+  "parameters": {},
+  "reasoning": "需要了解项目的基本信息和文件数量"
+}
+\`\`\`
+
+**示例2：创建LaTeX章节文件**
+\`\`\`json
+{
+  "type": "write",
+  "action": "create_file",
+  "parameters": {
+    "file_path": "/chapters/chapter1.tex",
+    "content": "\\\\\\\\chapter{量子力学基础}\\\\\\\\n\\\\\\\\n这是第一章的内容。\\\\\\\\n\\\\\\\\n\\\\\\\\section{基本概念}\\\\\\\\n\\\\\\\\n量子力学是描述微观粒子运动的理论。"
+  },
+  "reasoning": "创建第一章文件，包含章节标题和基本内容"
+}
+\`\`\`
+
+**示例3：任务完成**
+\`\`\`json
+{
+  "type": "complete",
+  "message": "所有章节文件已成功创建，LaTeX文档结构已完成。创建了3个章节文件和1个主文件，项目结构完整。",
+  "reasoning": "用户要求的所有LaTeX文件都已创建完成，任务目标已达成"
+}
+\`\`\`
+
+**💡 关键原则：**
+- 一次只做一件事
+- 先了解再行动
+- 每个操作都要有明确的reasoning
+- 所有操作结果都会完整返回
+- 确保LaTeX代码正确转义
+- 严格按照JSON格式返回`;
+    }
+    
+    /**
+     * 构建单操作模式的消息
+     */
+    buildSingleOperationMessage(originalMessage, context, operationHistory) {
+        let message = `**用户需求：** ${originalMessage}\n\n`;
+        
+        // 添加当前上下文信息
+        message += `**📊 当前状态：**\n`;
+        
+        // 项目信息
+        if (context.project) {
+            message += `- 项目：${context.project.name || '未命名'} (${context.project.files || 0} 个文件)\n`;
+        }
+        
+        // 当前编辑器状态
+        if (context.editor && context.editor.filePath) {
+            message += `- 当前文件：${context.editor.filePath}\n`;
+        }
+        
+        // 最新操作结果
+        if (context.lastOperationResult) {
+            message += `- 上次操作结果：✅ 成功\n`;
+        }
+        
+        // 操作历史统计
+        const readOps = operationHistory.filter(h => h.operation.type === 'read').length;
+        const writeOps = operationHistory.filter(h => h.operation.type === 'write').length;
+        
+        message += `- 已执行操作：🟢 ${readOps} 读 | 🟣 ${writeOps} 写\n\n`;
+        
+        // 详细操作历史（最近5个）
+        if (operationHistory.length > 0) {
+            message += `**📜 操作历史：**\n`;
+            const recentOps = operationHistory.slice(-5);
+            
+            recentOps.forEach((hist, index) => {
+                const op = hist.operation;
+                const result = hist.result;
+                const icon = op.type === 'read' ? '🟢' : '🟣';
+                const status = result.success ? '✅' : '❌';
+                
+                message += `${hist.operationNumber}. ${icon} ${op.action} - ${status}\n`;
+                message += `   目标: ${op.parameters.file_path || op.parameters.directory_path || '系统操作'}\n`;
+                
+                // 如果是读操作且有返回值，显示简要信息
+                if (op.type === 'read' && op.need_return && result.success) {
+                    if (op.action === 'read_file' && result.content) {
+                        const preview = result.content.substring(0, 100);
+                        message += `   内容预览: ${preview}${result.content.length > 100 ? '...' : ''}\n`;
+                    } else if (op.action === 'list_files' && result.files) {
+                        message += `   发现: ${result.files.length} 个文件/目录\n`;
+                    } else if (op.action === 'get_file_structure' && result.structure) {
+                        message += `   结构: 已获取项目结构\n`;
+                    }
+                }
+                
+                message += `\n`;
+            });
+            
+            if (operationHistory.length > 5) {
+                message += `   ... 还有 ${operationHistory.length - 5} 个历史操作\n\n`;
+            }
+        }
+        
+        // 上次操作的详细结果（如果需要返回值）
+        if (context.lastOperationResult && context.lastOperationResult.success) {
+            const lastOp = operationHistory[operationHistory.length - 1]?.operation;
+            if (lastOp && lastOp.type === 'read') {
+                message += `**📄 上次读操作详细结果：**\n`;
+                
+                const result = context.lastOperationResult;
+                if (lastOp.action === 'read_file' && result.content) {
+                    message += `- 文件路径: ${result.file_path}\n`;
+                    message += `- 文件内容:\n\`\`\`\n${result.content}\n\`\`\`\n\n`;
+                } else if (lastOp.action === 'list_files' && result.files) {
+                    message += `- 目录: ${result.directory}\n`;
+                    message += `- 文件列表:\n`;
+                    result.files.forEach(file => {
+                        message += `  ${file.type === 'directory' ? '📁' : '📄'} ${file.name}\n`;
+                    });
+                    message += `\n`;
+                } else if (lastOp.action === 'get_file_structure' && result.structure) {
+                    message += `- 项目结构:\n\`\`\`\n${result.structure}\n\`\`\`\n\n`;
+                } else if (lastOp.action === 'search_in_files' && result.results) {
+                    message += `- 搜索结果: ${result.results.length} 个匹配\n`;
+                    result.results.slice(0, 5).forEach(match => {
+                        message += `  ${match.file_path}:${match.line_number} - ${match.line_content.trim()}\n`;
+                    });
+                    message += `\n`;
+                }
+            }
+        }
+        
+        // 任务指导
+        message += `**🎯 下一步操作指导：**\n`;
+        message += `- 如需了解项目结构，使用 get_file_structure\n`;
+        message += `- 如需读取文件内容，使用 read_file\n`;
+        message += `- 如需创建文件，使用 create_file 并确保LaTeX代码正确转义\n`;
+        message += `- 如果任务已完成，返回 complete 类型\n\n`;
+        
+        message += `**请选择下一个操作：**`;
+        
+        return message;
+    }
+    
+    /**
+     * 解析单操作响应
+     */
+    parseSingleOperation(response) {
+        try {
+            if (!response || typeof response !== 'string') {
+                return null;
+            }
+            
+            // 提取JSON部分
+            const jsonMatch = response.match(/```json\s*([\s\S]*?)\s*```/) || 
+                             response.match(/\{[\s\S]*\}/);
+            
+            if (!jsonMatch) {
+                this.log('warn', '响应中未找到JSON格式');
+                return null;
+            }
+            
+            const jsonStr = jsonMatch[1] || jsonMatch[0];
+            let operation = JSON.parse(jsonStr);
+            
+            // **智能格式修复**
+            operation = this.autoFixOperationFormat(operation);
+            
+            // 验证必需字段
+            if (!operation.type) {
+                this.log('warn', '操作缺少type字段');
+                return null;
+            }
+            
+            // 验证操作类型
+            const validTypes = ['read', 'write', 'complete'];
+            if (!validTypes.includes(operation.type)) {
+                this.log('warn', `无效的操作类型: ${operation.type}`);
+                return null;
+            }
+            
+            // 对于读写操作，验证必需字段
+            if (operation.type !== 'complete') {
+                if (!operation.action || !operation.parameters) {
+                    this.log('warn', '读写操作缺少action或parameters字段');
+                    return null;
+                }
+            }
+            
+            // 预处理LaTeX内容
+            if (operation.type === 'write' && operation.parameters.content) {
+                operation.parameters.content = this.preprocessLatexContent(operation.parameters.content);
+            }
+            
+            this.log('info', `解析操作成功: ${operation.type} - ${operation.action || 'complete'}`);
+            return operation;
+            
+        } catch (error) {
+            this.log('error', '解析操作响应失败', error);
+            return null;
+        }
+    }
+    
+    /**
+     * 自动修复AI响应格式错误
+     */
+    autoFixOperationFormat(operation) {
+        // 定义读操作和写操作映射
+        const readActions = [
+            'read_file', 'list_files', 'get_file_structure', 'search_in_files',
+            'get_project_info', 'get_current_file', 'get_editor_state',
+            'get_selection', 'get_cursor_position', 'get_open_tabs', 'get_recent_changes'
+        ];
+        
+        const writeActions = [
+            'create_file', 'edit_file', 'delete_file', 'create_directory',
+            'delete_directory', 'move_file', 'rename_file', 'write_file'
+        ];
+        
+        // 情况1：AI直接返回了action作为type
+        if (readActions.includes(operation.type)) {
+            this.log('info', `自动修复：将 ${operation.type} 从 type 字段移动到 action 字段（读操作）`);
+            return {
+                type: 'read',
+                action: operation.type,
+                parameters: operation.parameters || {},
+                reasoning: operation.reasoning || `执行读操作: ${operation.type}`
+            };
+        }
+        
+        if (writeActions.includes(operation.type)) {
+            this.log('info', `自动修复：将 ${operation.type} 从 type 字段移动到 action 字段（写操作）`);
+            return {
+                type: 'write',
+                action: operation.type,
+                parameters: operation.parameters || {},
+                reasoning: operation.reasoning || `执行写操作: ${operation.type}`
+            };
+        }
+        
+        // 情况2：缺少必要字段，尝试从其他字段推断
+        if (!operation.action && operation.tool_name) {
+            this.log('info', `自动修复：从 tool_name 字段推断 action`);
+            operation.action = operation.tool_name;
+        }
+        
+        if (!operation.parameters && operation.args) {
+            this.log('info', `自动修复：从 args 字段推断 parameters`);
+            operation.parameters = operation.args;
+        }
+        
+        // 情况3：根据action自动推断type
+        if (!operation.type && operation.action) {
+            if (readActions.includes(operation.action)) {
+                this.log('info', `自动修复：根据 action ${operation.action} 推断为读操作`);
+                operation.type = 'read';
+            } else if (writeActions.includes(operation.action)) {
+                this.log('info', `自动修复：根据 action ${operation.action} 推断为写操作`);
+                operation.type = 'write';
+            }
+        }
+        
+        // 情况4：处理完成任务的格式
+        if (operation.type === 'complete' || operation.action === 'complete') {
+            return {
+                type: 'complete',
+                message: operation.message || operation.content || '任务已完成',
+                reasoning: operation.reasoning || '用户任务已完成'
+            };
+        }
+        
+        return operation;
+    }
+    
+    /**
+     * 执行单个操作
+     */
+    async executeSingleOperation(operation, context) {
+        const startTime = Date.now();
+        
+        try {
+            this.log('info', `执行操作: ${operation.type} - ${operation.action || 'complete'}`);
+            
+            if (operation.type === 'complete') {
+                return {
+                    success: true,
+                    type: 'complete',
+                    message: operation.message || '任务已完成',
+                    duration: Date.now() - startTime
+                };
+            }
+            
+            let result;
+            
+            if (operation.type === 'read') {
+                // 执行读操作
+                result = await this.executeReadOperation(operation);
+            } else if (operation.type === 'write') {
+                // 执行写操作
+                result = await this.executeWriteOperation(operation);
+            } else {
+                throw new Error(`未知的操作类型: ${operation.type}`);
+            }
+            
+            result.duration = Date.now() - startTime;
+            this.log('info', `操作完成: ${result.success ? '成功' : '失败'} (${result.duration}ms)`);
+            
+            return result;
+            
+        } catch (error) {
+            this.log('error', `操作执行失败: ${operation.type} - ${operation.action}`, error);
+            
+            return {
+                success: false,
+                type: operation.type,
+                action: operation.action,
+                error: error.message,
+                duration: Date.now() - startTime
+            };
+        }
+    }
+    
+    /**
+     * 执行读操作
+     */
+    async executeReadOperation(operation) {
+        const { action, parameters } = operation;
+        
+        try {
+            let result;
+            
+            switch (action) {
+                case 'read_file':
+                    result = await this.toolCallManager.readFile(parameters);
+                    break;
+                case 'list_files':
+                    result = await this.toolCallManager.listFiles(parameters);
+                    break;
+                case 'get_file_structure':
+                    result = await this.toolCallManager.getFileStructure(parameters);
+                    break;
+                case 'search_in_files':
+                    result = await this.toolCallManager.searchInFiles(parameters);
+                    break;
+                case 'get_project_info':
+                    result = await this.toolCallManager.getProjectInfo();
+                    break;
+                case 'get_current_file':
+                    result = this.toolCallManager.getCurrentFile();
+                    break;
+                default:
+                    throw new Error(`未知的读操作: ${action}`);
+            }
+            
+            // 始终返回完整结果
+            result.type = 'read';
+            result.action = action;
+            
+            return result;
+            
+        } catch (error) {
+            return {
+                success: false,
+                type: 'read',
+                action: action,
+                error: error.message
+            };
+        }
+    }
+    
+    /**
+     * 执行写操作
+     */
+    async executeWriteOperation(operation) {
+        const { action, parameters } = operation;
+        
+        try {
+            let result;
+            
+            switch (action) {
+                case 'create_file':
+                    // 确保目录存在
+                    await this.ensureDirectoryExists(parameters.file_path);
+                    await window.ide.fileSystem.writeFile(parameters.file_path, parameters.content || '');
+                    result = {
+                        success: true,
+                        file_path: parameters.file_path,
+                        content_length: (parameters.content || '').length,
+                        message: `文件 ${parameters.file_path} 创建成功`
+                    };
+                    break;
+                    
+                case 'edit_file':
+                    const editType = parameters.edit_type || 'replace';
+                    
+                    if (editType === 'replace') {
+                        await this.ensureDirectoryExists(parameters.file_path);
+                        await window.ide.fileSystem.writeFile(parameters.file_path, parameters.content || '');
+                    } else if (editType === 'append') {
+                        let existingContent = '';
+                        try {
+                            existingContent = await window.ide.fileSystem.readFile(parameters.file_path);
+                        } catch (error) {
+                            // 文件不存在，创建新文件
+                            await this.ensureDirectoryExists(parameters.file_path);
+                        }
+                        const newContent = existingContent + (parameters.content || '');
+                        await window.ide.fileSystem.writeFile(parameters.file_path, newContent);
+                    }
+                    
+                    result = {
+                        success: true,
+                        file_path: parameters.file_path,
+                        edit_type: editType,
+                        content_length: (parameters.content || '').length,
+                        message: `文件 ${parameters.file_path} 编辑成功`
+                    };
+                    break;
+                    
+                case 'delete_file':
+                    await window.ide.fileSystem.unlink(parameters.file_path);
+                    result = {
+                        success: true,
+                        file_path: parameters.file_path,
+                        message: `文件 ${parameters.file_path} 删除成功`
+                    };
+                    break;
+                    
+                case 'create_directory':
+                    await this.ensureDirectoryExists(parameters.directory_path, true);
+                    result = {
+                        success: true,
+                        directory_path: parameters.directory_path,
+                        message: `目录 ${parameters.directory_path} 创建成功`
+                    };
+                    break;
+                    
+                case 'delete_directory':
+                    await window.ide.fileSystem.rmdir(parameters.directory_path);
+                    result = {
+                        success: true,
+                        directory_path: parameters.directory_path,
+                        message: `目录 ${parameters.directory_path} 删除成功`
+                    };
+                    break;
+                    
+                case 'move_file':
+                    await this.ensureDirectoryExists(parameters.target_path);
+                    await window.ide.fileSystem.rename(parameters.source_path, parameters.target_path);
+                    result = {
+                        success: true,
+                        source_path: parameters.source_path,
+                        target_path: parameters.target_path,
+                        message: `文件从 ${parameters.source_path} 移动到 ${parameters.target_path}`
+                    };
+                    break;
+                    
+                default:
+                    throw new Error(`未知的写操作: ${action}`);
+            }
+            
+            // 强制刷新文件树
+            await this.forceRefreshFileTree();
+            
+            result.type = 'write';
+            result.action = action;
+            
+            return result;
+            
+        } catch (error) {
+            return {
+                success: false,
+                type: 'write',
+                action: action,
+                error: error.message,
+                parameters: parameters
+            };
+        }
+    }
+    
+    /**
+     * 预处理LaTeX内容
+     */
+    preprocessLatexContent(content) {
+        if (!content || typeof content !== 'string') {
+            return content;
+        }
+        
+        try {
+            // 修复LaTeX转义问题
+            let processed = content;
+            
+            // 将四个反斜杠转换为两个（JSON中的四个反斜杠 = 实际的两个反斜杠）
+            processed = processed.replace(/\\\\\\\\/g, '\\\\');
+            
+            this.log('info', `LaTeX内容预处理完成，原长度: ${content.length}, 处理后长度: ${processed.length}`);
+            
+            return processed;
+            
+        } catch (error) {
+            this.log('error', 'LaTeX内容预处理失败', error);
+            return content; // 返回原始内容
+        }
+    }
+    
+    /**
+     * **新增：初始化任务状态**
+     */
+    initTaskState() {
+        this.isExecuting = true;
+        this.shouldPauseTask = false;
+        this.currentTaskId = `task_${Date.now()}`;
+        this.operationHistory = [];
+        this.log('info', `任务初始化: ${this.currentTaskId}`);
+    }
+    
+    /**
+     * **新增：重置任务状态**
+     */
+    resetTaskState() {
+        this.isExecuting = false;
+        this.shouldPauseTask = false;
+        this.currentTaskId = null;
+        this.log('info', '任务状态已重置');
+    }
+    
+    /**
+     * **新增：暂停当前任务**
+     */
+    pauseCurrentTask() {
+        if (this.isExecuting) {
+            this.shouldPauseTask = true;
+            this.log('info', '设置任务暂停标志');
+            return true;
+        }
+        return false;
+    }
+    
+    /**
+     * **新增：恢复当前任务**
+     */
+    resumeCurrentTask() {
+        this.shouldPauseTask = false;
+        this.log('info', '取消任务暂停标志');
+    }
+    
+    /**
+     * **新增：检查任务暂停状态**
+     */
+    checkTaskPause() {
+        return this.shouldPauseTask;
+    }
+    
+    /**
+     * **新增：更新操作历史UI**
+     */
+    updateOperationHistoryUI(operationHistory) {
+        try {
+            // 调用全局的操作历史渲染函数
+            if (window.renderOperationHistory && typeof window.renderOperationHistory === 'function') {
+                window.renderOperationHistory(operationHistory);
+                this.log('info', `操作历史UI已更新: ${operationHistory.length} 个操作`);
+            } else {
+                this.log('warn', 'renderOperationHistory 函数不可用');
+            }
+        } catch (error) {
+            this.log('error', '更新操作历史UI失败', error);
+        }
+    }
+    
+    /**
+     * **新增：检查重复操作**
+     */
+    checkDuplicateOperation(operation, operationHistory) {
+        if (operationHistory.length < 2) return false;
+        
+        // 检查最近3个操作是否有重复
+        const recentOps = operationHistory.slice(-3);
+        
+        for (const histItem of recentOps) {
+            const hist = histItem.operation;
+            
+            // 检查相同的操作类型和action
+            if (hist.type === operation.type && hist.action === operation.action) {
+                // 对于文件操作，还要检查目标文件
+                if (operation.parameters?.file_path && hist.parameters?.file_path) {
+                    if (operation.parameters.file_path === hist.parameters.file_path) {
+                        return true;
+                    }
+                } else if (operation.parameters?.directory_path && hist.parameters?.directory_path) {
+                    if (operation.parameters.directory_path === hist.parameters.directory_path) {
+                        return true;
+                    }
+                } else {
+                    // 对于无参数的操作（如get_file_structure），直接认为是重复
+                    return true;
+                }
+            }
+        }
+        
+        return false;
+    }
+    
+    /**
+     * **新增：更新上下文包含操作结果**
+     */
+    updateContextWithOperationResult(fullContext, operation, operationResult, operationHistory) {
+        // 创建新的上下文对象
+        const updatedContext = { ...fullContext };
+        
+        // 累积操作结果
+        if (!updatedContext.accumulatedResults) {
+            updatedContext.accumulatedResults = {};
+        }
+        
+        // 存储操作结果
+        const resultKey = `${operation.action}_${Date.now()}`;
+        updatedContext.accumulatedResults[resultKey] = {
+            operation,
+            result: operationResult,
+            timestamp: new Date().toISOString()
+        };
+        
+        // 根据操作类型更新特定字段
+        switch (operation.action) {
+            case 'get_file_structure':
+                if (operationResult.structure) {
+                    updatedContext.fileStructure = operationResult.structure;
+                    updatedContext.projectStructureKnown = true;
+                }
+                break;
+                
+            case 'read_file':
+                if (operationResult.content) {
+                    if (!updatedContext.knownFiles) {
+                        updatedContext.knownFiles = {};
+                    }
+                    updatedContext.knownFiles[operationResult.file_path] = {
+                        content: operationResult.content,
+                        lastRead: new Date().toISOString()
+                    };
+                }
+                break;
+                
+            case 'list_files':
+                if (operationResult.files) {
+                    if (!updatedContext.directoryListings) {
+                        updatedContext.directoryListings = {};
+                    }
+                    const dirPath = operation.parameters?.directory_path || '/';
+                    updatedContext.directoryListings[dirPath] = {
+                        files: operationResult.files,
+                        lastListed: new Date().toISOString()
+                    };
+                }
+                break;
+                
+            case 'get_project_info':
+                if (operationResult.success) {
+                    updatedContext.projectInfo = operationResult;
+                }
+                break;
+        }
+        
+        // 更新最后操作结果
+        updatedContext.lastOperationResult = operationResult;
+        
+        // 统计信息
+        const readOps = operationHistory.filter(h => h.operation.type === 'read').length;
+        const writeOps = operationHistory.filter(h => h.operation.type === 'write').length;
+        
+        updatedContext.operationStats = {
+            totalOperations: operationHistory.length,
+            readOperations: readOps,
+            writeOperations: writeOps,
+            lastUpdate: new Date().toISOString()
+        };
+        
+        return updatedContext;
+    }
+    
+    /**
+     * **新增：构建增强的上下文消息**
+     */
+    buildEnhancedContextualMessage(originalMessage, fullContext, operationHistory) {
+        let message = `**用户需求：** ${originalMessage}\n\n`;
+        
+        // 检查已获取的信息
+        const hasFileStructure = !!(fullContext.fileStructure || fullContext.projectStructureKnown);
+        const hasFileContents = !!(fullContext.knownFiles && Object.keys(fullContext.knownFiles).length > 0);
+        const hasProjectInfo = !!(fullContext.projectInfo);
+        const hasDirectoryListings = !!(fullContext.directoryListings && Object.keys(fullContext.directoryListings).length > 0);
+        
+        // 信息状态摘要
+        message += `**📊 信息状态检查：**\n`;
+        message += `- 项目结构: ${hasFileStructure ? '✅ 已获取' : '❌ 未获取'}\n`;
+        message += `- 文件内容: ${hasFileContents ? '✅ 已获取' : '❌ 未获取'}\n`;
+        message += `- 项目信息: ${hasProjectInfo ? '✅ 已获取' : '❌ 未获取'}\n`;
+        message += `- 目录列表: ${hasDirectoryListings ? '✅ 已获取' : '❌ 未获取'}\n\n`;
+        
+        // 操作历史统计
+        if (operationHistory.length > 0) {
+            const readOps = operationHistory.filter(h => h.operation.type === 'read').length;
+            const writeOps = operationHistory.filter(h => h.operation.type === 'write').length;
+            
+            message += `**📜 操作历史统计：**\n`;
+            message += `- 总操作数: ${operationHistory.length}\n`;
+            message += `- 读操作: ${readOps} 次\n`;
+            message += `- 写操作: ${writeOps} 次\n\n`;
+            
+            // 显示最近的操作
+            const recentOps = operationHistory.slice(-5);
+            message += `**最近操作：**\n`;
+            recentOps.forEach((hist, index) => {
+                const op = hist.operation;
+                const result = hist.result;
+                const status = result.success ? '✅' : '❌';
+                message += `${hist.operationNumber}. ${status} ${op.action} `;
+                
+                if (op.parameters?.file_path) {
+                    message += `(${op.parameters.file_path})`;
+                } else if (op.parameters?.directory_path) {
+                    message += `(${op.parameters.directory_path})`;
+                }
+                message += '\n';
+            });
+            message += '\n';
+        }
+        
+        // 详细的已获取信息
+        if (hasFileStructure && fullContext.fileStructure) {
+            message += `**📁 已知项目结构：**\n`;
+            const structure = fullContext.fileStructure;
+            const preview = structure.length > 800 ? structure.substring(0, 800) + '\n... (结构过长，已截断)' : structure;
+            message += `\`\`\`\n${preview}\n\`\`\`\n\n`;
+        }
+        
+        if (hasFileContents && fullContext.knownFiles) {
+            message += `**📄 已知文件内容：**\n`;
+            Object.keys(fullContext.knownFiles).forEach(filePath => {
+                const fileInfo = fullContext.knownFiles[filePath];
+                const contentPreview = fileInfo.content.length > 400 
+                    ? fileInfo.content.substring(0, 400) + '\n... (内容过长，已截断)'
+                    : fileInfo.content;
+                message += `- **${filePath}** (读取时间: ${fileInfo.lastRead}):\n`;
+                message += `\`\`\`\n${contentPreview}\n\`\`\`\n\n`;
+            });
+        }
+        
+        if (hasDirectoryListings && fullContext.directoryListings) {
+            message += `**📂 已知目录内容：**\n`;
+            Object.keys(fullContext.directoryListings).forEach(dirPath => {
+                const listing = fullContext.directoryListings[dirPath];
+                message += `- **${dirPath}** (${listing.files.length} 个文件/目录):\n`;
+                listing.files.slice(0, 10).forEach(file => {
+                    message += `  ${file.type === 'directory' ? '📁' : '📄'} ${file.name}\n`;
+                });
+                if (listing.files.length > 10) {
+                    message += `  ... 还有 ${listing.files.length - 10} 个文件/目录\n`;
+                }
+                message += '\n';
+            });
+        }
+        
+        // 避免重复操作的提醒
+        message += `**⚠️ 重要提醒：**\n`;
+        message += `- 🚫 不要重复执行已经成功的读操作\n`;
+        message += `- 📋 使用上述已获取的信息来回答用户问题\n`;
+        message += `- 🎯 如果有足够信息执行用户要求的任务，请直接执行写操作\n`;
+        message += `- ✅ 如果任务已完成，请返回 complete 类型\n\n`;
+        
+        // 任务指导
+        message += `**🎯 下一步建议：**\n`;
+        
+        const lowerMessage = originalMessage.toLowerCase();
+        const needsWrite = /创建|新建|编辑|修改|删除/.test(lowerMessage);
+        const needsAnalysis = /分析|查看|检查|优化/.test(lowerMessage);
+        
+        if (needsWrite && hasFileStructure) {
+            message += `- 🟣 建议执行写操作：已有足够结构信息，可以创建/修改文件\n`;
+        } else if (needsAnalysis && (hasFileContents || hasFileStructure)) {
+            message += `- 📊 建议分析现有信息：已有足够数据进行分析\n`;
+        } else if (!hasFileStructure) {
+            message += `- 🟢 建议获取项目结构：使用 get_file_structure\n`;
+        } else if (!hasFileContents && needsWrite) {
+            message += `- 🟢 建议读取关键文件：如 main.tex 等\n`;
+        } else {
+            message += `- 🎯 建议基于现有信息执行用户请求\n`;
+        }
+        
+        message += `\n**请基于上述已获取的信息选择合适的操作，避免重复获取。**`;
+        
+        return message;
     }
 }
 
