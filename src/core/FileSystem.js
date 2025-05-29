@@ -12,7 +12,7 @@ export class FileSystem {
                 fs: "MountableFileSystem",
                 options: {
                     "/": {
-                        fs: "InMemory"
+                        fs: "LocalStorage"
                     },
                     "/tmp": {
                         fs: "InMemory"
@@ -26,7 +26,7 @@ export class FileSystem {
 
                 this.fs = BrowserFS.BFSRequire('fs');
                 this.initialized = true;
-                console.log('文件系统初始化完成');
+                console.log('文件系统初始化完成 - 使用 LocalStorage 持久化存储');
                 resolve();
             });
         });

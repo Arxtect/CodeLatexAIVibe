@@ -383,6 +383,14 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                     
                     const toolCallResult = await this.handleToolCallsWithReadOnlyFilter(response, accumulatedContext);
                     
+                    // 记录工具调用结果详情
+                    console.log(`📊 工具调用结果详情:`, {
+                        resultKeys: Object.keys(toolCallResult.results),
+                        resultSummary: toolCallResult.summary,
+                        accumulatedContextBefore: Object.keys(accumulatedContext),
+                        toolCallIteration: iteration
+                    });
+                    
                     // 将工具调用结果添加到累积上下文
                     accumulatedContext = this.mergeContext(accumulatedContext, {
                         toolCallResults: toolCallResult.results,
@@ -397,6 +405,13 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                         timestamp: new Date().toISOString()
                     });
                     
+                    // 记录上下文累积后的状态
+                    console.log(`🔄 上下文累积后状态:`, {
+                        accumulatedContextAfter: Object.keys(accumulatedContext),
+                        contextSize: JSON.stringify(accumulatedContext).length,
+                        conversationHistoryLength: conversationHistory.length
+                    });
+                    
                     this.log('info', `工具调用完成，获得 ${Object.keys(toolCallResult.results).length} 个结果`);
                     
                 } else if (typeof response === 'string') {
@@ -406,6 +421,11 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                     if (executionPlan && executionPlan.operations && executionPlan.operations.length > 0) {
                         // AI 选择了执行操作模式
                         this.log('info', 'AI 选择了执行操作模式');
+                        console.log(`🚀 执行计划详情:`, {
+                            operations: executionPlan.operations,
+                            operationCount: executionPlan.operations.length,
+                            executionIteration: iteration
+                        });
                         
                         const executeResult = await this.executeOperationsFromPlan(executionPlan, accumulatedContext);
                         
@@ -428,6 +448,13 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                     } else {
                         // AI 认为任务已完成或给出了最终回答
                         this.log('info', 'AI 给出最终回答');
+                        console.log(`✅ 任务完成总结:`, {
+                            finalResponse: response,
+                            totalIterations: iteration,
+                            toolCallRounds: conversationHistory.filter(h => h.type === 'tool_calls').length,
+                            executionRounds: conversationHistory.filter(h => h.type === 'execute_operations').length,
+                            finalContextKeys: Object.keys(accumulatedContext)
+                        });
                         
                         const finalMessage = `${response}\n\n` +
                             `📊 处理摘要：\n` +
@@ -439,6 +466,11 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                     }
                 } else {
                     this.log('warn', '未知的响应格式', response);
+                    console.log(`❓ 未知响应格式:`, {
+                        responseType: typeof response,
+                        responseKeys: response && typeof response === 'object' ? Object.keys(response) : [],
+                        iteration: iteration
+                    });
                     return this.createResponse('❌ 响应格式异常，请重试');
                 }
             }
@@ -776,7 +808,19 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                     }
                 };
                 
+                this.log('info', `执行工具调用: ${tool.name}`, { parameters: tool.parameters });
+                
                 const result = await this.toolCallManager.executeToolCall(toolCall);
+                
+                // 详细记录工具调用结果
+                console.log(`🔧 工具调用 [${tool.name}] 结果:`, {
+                    parameters: tool.parameters,
+                    result: result,
+                    success: result?.success !== false,
+                    resultType: typeof result,
+                    resultKeys: result && typeof result === 'object' ? Object.keys(result) : [],
+                    timestamp: new Date().toISOString()
+                });
                 
                 // 存储结果
                 results.gatheredData[tool.name] = result;
@@ -786,7 +830,7 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                     window.agentPanel.updateToolCallStep(toolCallId, i, 'success', result);
                 }
                 
-                this.log('info', `工具 ${tool.name} 执行成功`);
+                this.log('info', `工具 ${tool.name} 执行成功`, { result: result });
                 
             } catch (error) {
                 this.log('error', `工具 ${tool.name} 执行失败`, error);
