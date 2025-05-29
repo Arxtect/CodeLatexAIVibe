@@ -1740,7 +1740,33 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                         }
                         
                         this.log('info', `API 调用成功，使用了 ${data.usage?.total_tokens || '未知'} tokens`);
-                        return choice.message.content;
+                        
+                        // **新增：检查响应是否被误判为工具调用响应**
+                        // 如果响应内容包含工具调用但实际没有工具调用，直接返回内容
+                        const content = choice.message.content;
+                        if (content && typeof content === 'string') {
+                            // 检查是否包含```operations块，这表示是执行指令而不是工具调用
+                            if (content.includes('```operations')) {
+                                this.log('info', '检测到执行指令，返回普通文本响应');
+                                return content;
+                            }
+                            
+                            // 检查是否是最终回答（包含总结、建议等）
+                            const finalAnswerKeywords = [
+                                '下一步', '建议', '总结', '完成', '步骤', '结构',
+                                '章节', '内容', '撰写', '编写', '继续'
+                            ];
+                            const isFinalAnswer = finalAnswerKeywords.some(keyword => 
+                                content.toLowerCase().includes(keyword)
+                            );
+                            
+                            if (isFinalAnswer) {
+                                this.log('info', '检测到最终回答，返回普通文本响应');
+                                return content;
+                            }
+                        }
+                        
+                        return content;
                     }
                 }
                 
@@ -2212,7 +2238,46 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
             return false;
         }
         
-        // 特殊情况：如果用户明确要求查看、分析或扩写项目内容，优先使用工具调用
+        // **新增：检查上下文中是否已有足够信息**
+        // 如果消息包含用户上下文信息，检查是否已有相关文件内容
+        if (conversationMessages && conversationMessages.length > 0) {
+            // 查找最近的用户消息，检查是否包含上下文信息
+            const userMessages = conversationMessages.filter(msg => msg.role === 'user');
+            const lastUserMessage = userMessages[userMessages.length - 1];
+            
+            if (lastUserMessage && lastUserMessage.content) {
+                const content = lastUserMessage.content;
+                
+                // 检查是否已有具体获取的信息部分
+                if (content.includes('具体获取的信息：') || content.includes('📄 **read_file**:')) {
+                    // 检查是否已经有文件内容
+                    const hasFileContent = /📄 \*\*read_file\*\*:[\s\S]*?文件内容:/m.test(content);
+                    if (hasFileContent) {
+                        this.log('info', `工具调用判断: "${message.substring(0, 50)}..." -> false (已有文件内容)`);
+                        return false;
+                    }
+                }
+                
+                // 检查是否已有文件列表
+                if (content.includes('📄 **list_files**:') || content.includes('找到') && content.includes('个文件/目录:')) {
+                    // 如果用户只是要求分析现有内容而不是获取新文件，不需要工具调用
+                    const analysisKeywords = ['分析', '扩写', '完善', '创建', '新建', '修改'];
+                    const needsAnalysis = analysisKeywords.some(keyword => lowerMessage.includes(keyword));
+                    if (needsAnalysis) {
+                        this.log('info', `工具调用判断: "${message.substring(0, 50)}..." -> false (已有文件列表，需要分析)`);
+                        return false;
+                    }
+                }
+                
+                // 检查是否已有项目结构信息
+                if (content.includes('📄 **get_file_structure**:') || content.includes('项目结构:')) {
+                    this.log('info', `工具调用判断: "${message.substring(0, 50)}..." -> false (已有项目结构)`);
+                    return false;
+                }
+            }
+        }
+        
+        // 特殊情况：如果用户明确要求查看、分析或扩写项目内容，但没有具体信息，才使用工具调用
         const projectAnalysisKeywords = [
             '查看.*项目', '分析.*项目', '整个项目', '所有.*章节', '扩写.*章节',
             '新建.*章节', '完善.*文档', '优化.*结构'
@@ -2224,7 +2289,16 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
         });
         
         if (needsProjectAnalysis) {
-            this.log('info', `工具调用判断: "${message.substring(0, 50)}..." -> true (需要项目分析)`);
+            // 但是要检查是否已经有相关信息了
+            if (conversationMessages && conversationMessages.length > 0) {
+                const toolResults = conversationMessages.filter(msg => msg.role === 'tool');
+                if (toolResults.length > 2) { // 如果已经有多次工具调用，可能已经有足够信息
+                    this.log('info', `工具调用判断: "${message.substring(0, 50)}..." -> false (已有${toolResults.length}次工具调用结果)`);
+                    return false;
+                }
+            }
+            
+            this.log('info', `工具调用判断: "${message.substring(0, 50)}..." -> true (需要项目分析，但信息不足)`);
             return true;
         }
         
@@ -2251,8 +2325,23 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                         // 如果有文件列表但消息中提到具体文件操作，可能需要读取文件
                         const needsFileContent = /读取|查看|内容|分析|修改|编辑|扩写/.test(lowerMessage);
                         if (needsFileContent) {
-                            this.log('info', `工具调用判断: "${message.substring(0, 50)}..." -> true (需要读取文件内容)`);
-                            return true;
+                            // 但是要检查是否已经读取过文件了
+                            const hasReadResults = toolResults.some(tr => {
+                                try {
+                                    const trResult = JSON.parse(tr.content);
+                                    return trResult.content && trResult.file_path; // 有文件内容说明已经读取过
+                                } catch (e) {
+                                    return false;
+                                }
+                            });
+                            
+                            if (hasReadResults) {
+                                this.log('info', `工具调用判断: "${message.substring(0, 50)}..." -> false (已读取过文件内容)`);
+                                return false;
+                            } else {
+                                this.log('info', `工具调用判断: "${message.substring(0, 50)}..." -> true (需要读取文件内容)`);
+                                return true;
+                            }
                         }
                     }
                     
@@ -2264,9 +2353,9 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
             }
         }
         
-        // 默认情况下，如果有工具关键词就启用工具调用
-        this.log('info', `工具调用判断: "${message.substring(0, 50)}..." -> true (包含工具关键词)`);
-        return true;
+        // 默认情况下，如果有工具关键词但检查发现可能不需要，返回false
+        this.log('info', `工具调用判断: "${message.substring(0, 50)}..." -> false (有关键词但可能已有足够信息)`);
+        return false;
     }
     
     /**
@@ -2668,11 +2757,40 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
 - 如果上下文中已经显示了搜索结果，不要重复搜索
 - **基于已获取的具体信息进行决策，而不是一直获取更多信息**
 
+**执行操作的时机（重要）：**
+- **当你已经看到文件内容并且用户要求修改/扩写时** → 立即执行操作，不要再获取更多信息
+- **当你已经了解项目结构并且用户要求创建新文件时** → 立即执行操作
+- **当你有足够信息来完成用户请求时** → 立即执行操作，不要犹豫
+- **避免"分析后再决定"的模式** → 直接基于已有信息执行操作
+
+**操作指令示例：**
+当需要创建或修改文件时，使用以下格式：
+\`\`\`operations
+[
+  {
+    "type": "create",
+    "description": "创建新的章节文件",
+    "target": "/chapters/chapter1.tex",
+    "content": "\\chapter{量子力学的基础}\\n\\n这是第一章的内容..."
+  },
+  {
+    "type": "edit", 
+    "description": "扩写现有章节",
+    "target": "/chapters/chapter2.tex",
+    "editType": "replace",
+    "startLine": 1,
+    "endLine": -1,
+    "content": "完整的新文件内容..."
+  }
+]
+\`\`\`
+
 **完成条件（重要）：**
 - 当你已经完成了用户请求的所有操作时，直接回答总结结果，不要继续调用工具或执行操作
 - 当你已经提供了用户需要的信息或建议时，直接回答，不要继续获取更多信息
 - 当用户的问题是简单的询问时，直接回答，不需要文件操作
 - **当你看到上下文中已经有足够的信息来回答用户问题时，直接基于这些信息回答**
+- **当你看到上下文中已经有文件内容时，如果用户要求扩写/修改，立即执行操作**
 - 避免重复执行相同的操作或获取相同的信息
 
 **重要：**
@@ -2867,21 +2985,23 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
             }
             
             if (readFiles.size > 0) {
-                message += `\n**已读取的文件（信息已获取）：**\n`;
+                message += `\n🚫 **已读取的文件（请勿重复读取！）：**\n`;
                 Array.from(readFiles).forEach(file => {
-                    message += `- ${file}\n`;
+                    message += `- ${file} ✅ 已读取\n`;
                 });
+                message += `\n⚠️ **注意：上述文件内容已在"具体获取的信息"部分显示，请基于已有内容进行操作，不要重复读取！**\n`;
             }
             
             message += '\n';
         }
         
         // 添加明确的完成检查
-        message += `**重要提醒：**\n`;
-        message += `- 如果用户的需求已经通过上述操作完成，请直接总结结果，不要继续执行\n`;
-        message += `- 如果已经获取了足够的信息来回答用户问题，请直接回答，不要继续获取信息\n`;
-        message += `- 避免重复执行相同的操作或读取相同的文件\n`;
-        message += `- 如果任务已完成，请明确说明完成情况并停止\n\n`;
+        message += `**🎯 任务执行指导：**\n`;
+        message += `- 📋 如果用户要求扩写/修改文件且已有文件内容 → 立即执行操作，使用 \`\`\`operations 块\n`;
+        message += `- 📂 如果用户要求创建新文件且已了解项目结构 → 立即执行操作，创建相应文件\n`;
+        message += `- 🔍 如果已经获取了足够信息来回答用户问题 → 直接回答，不要继续获取信息\n`;
+        message += `- ⚠️ 避免重复执行相同的操作或读取相同的文件\n`;
+        message += `- ✅ 如果任务已完成，请明确说明完成情况并停止\n\n`;
         
         message += `**请基于上述信息，选择合适的方式处理用户需求。**`;
         
