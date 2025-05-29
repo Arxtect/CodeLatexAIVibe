@@ -962,8 +962,35 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
             'get_file_structure',
             'search_in_files',
             'get_project_info',
-            'get_editor_state'
+            'get_editor_state',
+            'get_current_file',
+            'get_selection',
+            'get_cursor_position',
+            'get_open_tabs',
+            'get_recent_changes'
         ];
+        
+        // 明确排除所有写入工具
+        const writeOnlyTools = [
+            'write_file',
+            'create_file',
+            'delete_file',
+            'create_directory',
+            'delete_directory',
+            'move_file',
+            'rename_file',
+            'compile_latex',
+            'save_file',
+            'close_file',
+            'open_file'
+        ];
+        
+        // 如果是写入工具，直接返回false
+        if (writeOnlyTools.includes(toolName)) {
+            this.log('warn', `工具 ${toolName} 是写入操作，不允许在工具调用模式下使用`);
+            return false;
+        }
+        
         return readOnlyTools.includes(toolName);
     }
     
@@ -2569,6 +2596,11 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
 - \`get_project_info\`: 获取项目信息
 - \`get_editor_state\`: 获取编辑器状态
 
+**⚠️ 工具调用限制：**
+- 工具调用模式下 **绝对禁止** 使用任何写入工具
+- 禁止的工具包括：write_file, create_file, delete_file, create_directory, compile_latex 等
+- 只能使用上述明确列出的只读工具
+
 **2. 执行操作模式（文件操作）**
 当你有足够信息需要执行具体操作时，在你的回答中包含操作指令：
 
@@ -2602,8 +2634,8 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
 - \`compile\`: 编译LaTeX文档
 
 **决策原则：**
-1. 如果需要查看/分析现有文件但没有足够信息 → 使用工具调用
-2. 如果需要搜索特定内容但不知道在哪个文件 → 使用工具调用
+1. 如果需要查看/分析现有文件但没有足够信息 → 使用工具调用（只读）
+2. 如果需要搜索特定内容但不知道在哪个文件 → 使用工具调用（只读）
 3. 如果有足够信息可以执行具体操作 → 在回答中包含操作指令
 4. 如果只是回答问题或提供建议 → 直接回答
 5. **如果任务已完成或无需进一步操作 → 直接回答并总结完成情况**
@@ -2615,11 +2647,15 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
 - 避免重复执行相同的操作或获取相同的信息
 
 **重要：**
-- 工具调用只能用于读取信息，不能修改文件
+- 工具调用只能用于读取信息，**绝对不能修改文件**
 - 操作指令只能用于修改文件，不能读取信息
 - 你可以在多轮对话中灵活切换这两种模式
 - 每次的结果都会作为上下文提供给你，帮助你做出更好的决策
-- **一旦任务完成，立即停止并总结结果，不要继续循环**`;
+- **一旦任务完成，立即停止并总结结果，不要继续循环**
+
+**严格禁止：**
+- 在工具调用模式下使用任何写入工具（如 write_file）
+- 混合使用工具调用和操作指令`;
     }
 
     /**

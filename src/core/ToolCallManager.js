@@ -780,6 +780,16 @@ export class ToolCallManager {
                 // 这里可以添加更新编辑器内容的逻辑
             }
             
+            // 刷新文件浏览器
+            if (this.ide.refreshFileExplorer) {
+                try {
+                    await this.ide.refreshFileExplorer();
+                    console.log(`文件浏览器已刷新: ${file_path}`);
+                } catch (refreshError) {
+                    console.warn('刷新文件浏览器失败:', refreshError);
+                }
+            }
+            
             return {
                 success: true,
                 file_path,
@@ -814,6 +824,16 @@ export class ToolCallManager {
             
             await this.ide.fileSystem.unlink(file_path);
             
+            // 刷新文件浏览器
+            if (this.ide.refreshFileExplorer) {
+                try {
+                    await this.ide.refreshFileExplorer();
+                    console.log(`文件浏览器已刷新 - 删除文件: ${file_path}`);
+                } catch (refreshError) {
+                    console.warn('刷新文件浏览器失败:', refreshError);
+                }
+            }
+            
             return {
                 success: true,
                 file_path,
@@ -847,6 +867,16 @@ export class ToolCallManager {
             }
             
             await this.ide.fileSystem.mkdir(directory_path);
+            
+            // 刷新文件浏览器
+            if (this.ide.refreshFileExplorer) {
+                try {
+                    await this.ide.refreshFileExplorer();
+                    console.log(`文件浏览器已刷新 - 创建目录: ${directory_path}`);
+                } catch (refreshError) {
+                    console.warn('刷新文件浏览器失败:', refreshError);
+                }
+            }
             
             return {
                 success: true,
