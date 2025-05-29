@@ -1093,9 +1093,31 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
         
         this.log('info', `执行动作: ${action.type} - ${target || action.description}`);
         
+        // 添加调试日志
+        console.log('executeAction 调试信息:', {
+            actionType: action.type,
+            target: target,
+            content: content ? `${content.substring(0, 100)}...` : 'null',
+            contentLength: content ? content.length : 0,
+            actionData: action.data ? Object.keys(action.data) : [],
+            actionStructure: Object.keys(action)
+        });
+        
         // 验证必要参数
         if (!target && action.type !== 'ui') {
             throw new Error(`动作 ${action.type} 缺少目标路径`);
+        }
+        
+        // 验证内容（对于需要内容的操作）
+        if ((action.type === 'create' || action.type === 'edit') && !content) {
+            console.warn(`警告: ${action.type} 操作没有内容`, {
+                target: target,
+                actionData: action.data,
+                contentSources: {
+                    actionContent: action.content,
+                    dataContent: action.data?.content
+                }
+            });
         }
         
         try {
@@ -1104,7 +1126,7 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                     // 创建文件，自动创建所需目录
                     await this.ensureDirectoryExists(target);
                     await window.ide.fileSystem.writeFile(target, content || '');
-                    this.log('info', `文件创建成功: ${target}`);
+                    this.log('info', `文件创建成功: ${target}, 内容长度: ${(content || '').length}`);
                     
                     // 更新文件浏览器
                     if (window.ide.updateFileTree) {
@@ -1130,6 +1152,7 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                     if (editType === 'replace') {
                         await this.ensureDirectoryExists(target);
                         await window.ide.fileSystem.writeFile(target, content || '');
+                        this.log('info', `文件编辑成功 (replace): ${target}, 内容长度: ${(content || '').length}`);
                     } else if (editType === 'insert') {
                         // 读取现有内容，插入新内容
                         let existingContent = '';
@@ -1146,6 +1169,7 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                         lines.splice(insertLine, 0, content || '');
                         
                         await window.ide.fileSystem.writeFile(target, lines.join('\n'));
+                        this.log('info', `文件编辑成功 (insert): ${target}`);
                     } else if (editType === 'delete') {
                         // 删除指定行
                         const existingContent = await window.ide.fileSystem.readFile(target);
@@ -1155,8 +1179,8 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
                         lines.splice(startLine, endLine - startLine + 1);
                         
                         await window.ide.fileSystem.writeFile(target, lines.join('\n'));
+                        this.log('info', `文件编辑成功 (delete): ${target}`);
                     }
-                    this.log('info', `文件编辑成功: ${target}`);
                     
                     // 如果当前文件正在编辑器中打开，更新编辑器内容
                     if (window.ide.currentFile === target && window.ide.editor) {
@@ -2107,7 +2131,7 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
             // 创建编辑动作，使用完整的文件替换
             return this.createAction('edit', {
                 filePath: filePath,
-                newContent: newContent,
+                content: newContent,  // 修改为content
                 editType: editType,
                 startLine: startLine,
                 endLine: endLine,
@@ -3185,11 +3209,30 @@ export class LatexMasterAgentPlugin extends AgentPluginBase {
             try {
                 this.log('info', `执行操作 ${i + 1}/${operations.length}: ${operation.type}`);
                 
+                // 添加详细的操作日志
+                console.log(`🔧 执行操作详情 [${operation.type}]:`, {
+                    index: i + 1,
+                    total: operations.length,
+                    operation: operation,
+                    hasContent: !!operation.content,
+                    contentLength: operation.content ? operation.content.length : 0,
+                    contentPreview: operation.content ? operation.content.substring(0, 200) + '...' : 'null'
+                });
+                
                 if (executionId && window.agentPanel) {
                     window.agentPanel.updateToolCallStep(executionId, i, 'executing');
                 }
                 
                 const action = await this.createActionFromOperation(operation, context);
+                
+                // 添加动作创建日志
+                console.log(`🎯 创建动作结果:`, {
+                    operationType: operation.type,
+                    actionType: action ? action.type : 'null',
+                    actionData: action ? Object.keys(action.data || {}) : [],
+                    actionTarget: action ? (action.target || action.data?.filePath) : 'null'
+                });
+                
                 const result = await this.executeAction(action);
                 
                 results[`operation_${i}`] = {
